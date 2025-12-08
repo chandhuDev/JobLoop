@@ -10,10 +10,15 @@ import (
 func LaunchBrowser() {
 	seedCompanies := []string{"producthunt", "ycombinator"}
 	fmt.Println("Launching browser...")
-	browserContext, browserCancel := chromedp.NewContext(context.Background())
-	defer browserCancel()
 
-	if err := chromdp.Run(browserContext); err!= nil {
+	opts := append(chromedp.DefaultExecAllocatorOptions[:],
+		chromedp.DisableGPU,
+		chromedp.UserDataDir(dir),
+	)
+	allocContext, allocCancel := chromedp.NewExecAllocator(context.Background(), opts...)
+	defer allocCancel()
+
+	if err := chromdp.Run(allocContext); err!= nil {
 		panic(err)
 	}
 
@@ -21,7 +26,7 @@ func LaunchBrowser() {
 
     for i := range 2 {
 		wg.Add(1)
-
+     
 		tabContext, tabCancel := chromedp.NewContext(browserContext)
 		switch seedCompanies[i] {
 		case "producthunt":
@@ -45,14 +50,64 @@ func LaunchBrowser() {
     wg.Wait()
 }
 
+
 func openProductHuntSearchJobs (tabContext context.Context) {
-   if err := chromedp.Run(tabContext, chromedp.Navigate("https://www.producthunt.com")); err!= nil {
-	   fmt.Println("Error navigating to Product Hunt:", err)
-   }
+	var productLinks []*cdp.Node
+    var results []string
+
+    err := chromedp.Run(tabContext,
+	 chromedp.Navigate("https://www.producthunt.com")
+	 chromedp.Sleep(2*time.Second)
+	 chromedp.Nodes(`a[href^="/products/"]`, &productLinks, chromedp.AtLeast(0)),
+	 ); 
+	 
+	 for _, n := range nodes {
+		var text string
+		err := chromedp.Run(ctx,
+			chromedp.Text(n.FullXPath(), &text, chromedp.NodeVisible),
+		)
+		if err != nil {
+			continue
+		}
+
+		results = append(results, text)
+	}
+
+	for i, r := range results {
+		fmt.Printf("%d → %s\n", i+1, r)
+	}
 }
 
+
 func openYCombinatorSearchJobs (tabContext context.Context) {
-	if err:= chromedp.Run(tabContext, chromedp.Navigate("https://www.ycombinator.com/companies")); err!= nil {
+	var productLinks []*cdp.Node
+    var resutls []string
+
+	err:= chromedp.Run(tabContext, 
+		chromedp.Navigate("https://www.ycombinator.com/companies")
+		chromedp.Sleep(5*time.Second)
+		chromedp.Nodes(`a[href^="/comapnies/"]`, &productLinks, chromedp.AtLeast(0)),
+
+	);
+     
+	if err!= nil {
 		fmt.Println("Error navigating to Y Combinator:", err)
 	}
+
+	for _, n := range nodes {
+		var text string
+		err := chromedp.Run(ctx,
+			chromedp.Text(n.FullXPath(), &text, chromedp.NodeVisible),
+		)
+		if err != nil {
+			continue
+		}
+
+		results = append(results, text)
+	}
+
+	for i, r := range results {
+		fmt.Printf("%d → %s\n", i+1, r)
+	}
+
 }
