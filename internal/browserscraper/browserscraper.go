@@ -4,110 +4,108 @@ import (
 	"fmt"
 	"context"
 	"sync"
+	"time"
 	"github.com/chromedp/chromedp"
+	"github.com/chromedp/cdproto/cdp"
 )
 
+type ScrapeConfig struct {
+	Name     string
+	URL      string
+	Selector string
+	WaitTime time.Duration
+}
+
 func LaunchBrowser() {
-	seedCompanies := []string{"producthunt", "ycombinator"}
+	configs := []ScrapeConfig{
+		{
+			Name:     "Product Hunt",
+			URL:      "https://www.producthunt.com",
+			Selector: `a[href^="/products/"]`,
+			WaitTime: 2 * time.Second,
+		},
+		{
+			Name:     "Y Combinator",
+			URL:      "https://www.ycombinator.com/companies",
+			Selector: `a[href^="/companies/"]`,
+			WaitTime: 5 * time.Second,
+		},
+	}
+
 	fmt.Println("Launching browser...")
 
 	opts := append(chromedp.DefaultExecAllocatorOptions[:],
-		chromedp.DisableGPU,
-		chromedp.UserDataDir(dir),
+		chromedp.Flag("headless", false),
+		chromedp.Flag("disable-gpu", false),
+		chromedp.WindowSize(1920, 1080),
 	)
+
 	allocContext, allocCancel := chromedp.NewExecAllocator(context.Background(), opts...)
 	defer allocCancel()
 
-	if err := chromdp.Run(allocContext); err!= nil {
+	browserContext, browserCancel := chromedp.NewContext(allocContext)
+	defer browserCancel()
+
+	if err := chromedp.Run(browserContext); err != nil {
 		panic(err)
 	}
 
 	var wg sync.WaitGroup
 
-    for i := range 2 {
+	for _, config := range configs {
 		wg.Add(1)
-     
 		tabContext, tabCancel := chromedp.NewContext(browserContext)
-		switch seedCompanies[i] {
-		case "producthunt":
-			go func() {
-				defer wg.Done()
-				defer tabCancel()
-				openProductHuntSearchJobs(tabContext)
-				
-			}()
-		case "ycombinator":
-			go func() {
-				defer wg.Done()
-				defer tabCancel()
-				openYCombinatorSearchJobs(tabContext)
-				
-			}()
 
+		go func(cfg ScrapeConfig) {
+			defer wg.Done()
+			defer tabCancel()
+			scrapeLinks(tabContext, cfg)
+		}(config)
+	}
+
+	wg.Wait()
+}
+
+func scrapeLinks(ctx context.Context, config ScrapeConfig) {
+	fmt.Printf("Opening %s...\n", config.Name)
+
+	var nodes []*cdp.Node
+
+	err := chromedp.Run(ctx,
+		chromedp.Navigate(config.URL),
+		chromedp.Sleep(config.WaitTime),
+		chromedp.Nodes(config.Selector, &nodes, chromedp.AtLeast(0)),
+	)
+
+	if err != nil {
+		fmt.Printf("Error navigating to %s: %v\n", config.Name, err)
+		return
+	}
+
+	results := extractTextFromNodes(ctx, nodes)
+
+	fmt.Printf("\n=== %s Results (%d found) ===\n", config.Name, len(results))
+	for i, text := range results {
+		fmt.Printf("%d → %s\n", i+1, text)
+	}
+}
+
+func extractTextFromNodes(parentCtx context.Context, nodes []*cdp.Node) []string {
+	var results []string
+
+	for _, node := range nodes {
+		var text string
+		err := chromedp.Run(parentCtx,
+			chromedp.Text(node.FullXPath(), &text, chromedp.NodeVisible),
+		)
+		if err != nil {
+			continue
 		}
 		
-	}
-    wg.Wait()
-}
-
-
-func openProductHuntSearchJobs (tabContext context.Context) {
-	var productLinks []*cdp.Node
-    var results []string
-
-    err := chromedp.Run(tabContext,
-	 chromedp.Navigate("https://www.producthunt.com")
-	 chromedp.Sleep(2*time.Second)
-	 chromedp.Nodes(`a[href^="/products/"]`, &productLinks, chromedp.AtLeast(0)),
-	 ); 
-	 
-	 for _, n := range nodes {
-		var text string
-		err := chromedp.Run(ctx,
-			chromedp.Text(n.FullXPath(), &text, chromedp.NodeVisible),
-		)
-		if err != nil {
-			continue
+		if text != "" {
+			results = append(results, text)
 		}
-
-		results = append(results, text)
 	}
 
-	for i, r := range results {
-		fmt.Printf("%d → %s\n", i+1, r)
-	}
-}
-
-
-func openYCombinatorSearchJobs (tabContext context.Context) {
-	var productLinks []*cdp.Node
-    var resutls []string
-
-	err:= chromedp.Run(tabContext, 
-		chromedp.Navigate("https://www.ycombinator.com/companies")
-		chromedp.Sleep(5*time.Second)
-		chromedp.Nodes(`a[href^="/comapnies/"]`, &productLinks, chromedp.AtLeast(0)),
-
-	);
-     
-	if err!= nil {
-		fmt.Println("Error navigating to Y Combinator:", err)
-	}
-
-	for _, n := range nodes {
-		var text string
-		err := chromedp.Run(ctx,
-			chromedp.Text(n.FullXPath(), &text, chromedp.NodeVisible),
-		)
-		if err != nil {
-			continue
-		}
-
-		results = append(results, text)
-	}
-
-	for i, r := range results {
-		fmt.Printf("%d → %s\n", i+1, r)
-	}
-
+	return results
 }

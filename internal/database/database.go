@@ -3,16 +3,27 @@ package database
 import (
    "fmt"
    "database/sql"
+   "os"
    _ "github.com/lib/pq"
 )
 
 func ConnectDatabase() {
-   db, err := sql.Open("postgress", "user=postgres password=postgres dbname=jobloop")
+   user := os.Getenv("DB_USER")
+   pass := os.Getenv("DB_PASS")
+
+   databaseOptions := fmt.Sprintf(
+		"user=%s password=%s dbname=jobloop sslmode=disable",
+		user, pass,
+	)
+
+   db, err := sql.Open("postgres", databaseOptions)
+
    if err != nil {
-	 panic(err)
+	  panic(err)
    }
    defer db.Close()
+
    if err := db.Ping(); err != nil {
-	panic(err)
-}
+	  panic(err)
+   }
 }

@@ -3,6 +3,12 @@ module github.com/chandhuDev/JobLoop
 go 1.25
 
 require (
+	github.com/chromedp/chromedp v0.14.2
+	github.com/joho/godotenv v1.5.1
+	github.com/lib/pq v1.10.9
+)
+
+require (
 	dario.cat/mergo v1.0.2 // indirect
 	github.com/air-verse/air v1.63.4 // indirect
 	github.com/bep/godartsass/v2 v2.5.0 // indirect

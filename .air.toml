@@ -4,11 +4,11 @@ tmp_dir = "bin"
 
 [build]
   args_bin = []
-  bin = "./bin"
-  cmd = "go build -o ./cmd/JobLoop/ ."
+  bin = "./bin/JobLoop"
+  cmd = "go build -o ./bin/JobLoop ./cmd/JobLoop"
   delay = 1000
-  exclude_dir = ["assets", "bin"]
-  exclude_file = []
+  exclude_dir = ["assets", "bin", "tests"]
+  exclude_file = ['.gitignore']
   exclude_regex = ["_test.go"]
   exclude_unchanged = false
   follow_symlink = false
