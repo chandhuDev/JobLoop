@@ -3,7 +3,7 @@ package main
 import (
 	"fmt"
 	"github.com/chandhuDev/JobLoop/internal/browserscraper"
-	"github.com/chandhuDev/JobLoop/internal/database"
+	 "github.com/chandhuDev/JobLoop/internal/database"
    "log"
    "github.com/joho/godotenv"
 )

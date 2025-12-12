@@ -19,11 +19,12 @@ func ConnectDatabase() {
    db, err := sql.Open("postgres", databaseOptions)
 
    if err != nil {
-	  panic(err)
+      fmt.Printf("DB connect failed: %v — continuing in debug mode\n", err)
    }
    defer db.Close()
 
    if err := db.Ping(); err != nil {
-	  panic(err)
+	   fmt.Printf("failed to ping the server", err)
+   
    }
 }

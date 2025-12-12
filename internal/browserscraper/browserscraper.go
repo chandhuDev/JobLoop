@@ -18,12 +18,7 @@ type ScrapeConfig struct {
 
 func LaunchBrowser() {
 	configs := []ScrapeConfig{
-		{
-			Name:     "Product Hunt",
-			URL:      "https://www.producthunt.com",
-			Selector: `a[href^="/products/"]`,
-			WaitTime: 2 * time.Second,
-		},
+	
 		{
 			Name:     "Y Combinator",
 			URL:      "https://www.ycombinator.com/companies",
@@ -69,6 +64,7 @@ func LaunchBrowser() {
 func scrapeLinks(ctx context.Context, config ScrapeConfig) {
 	fmt.Printf("Opening %s...\n", config.Name)
 
+
 	var nodes []*cdp.Node
 
 	err := chromedp.Run(ctx,
@@ -107,5 +103,6 @@ func extractTextFromNodes(parentCtx context.Context, nodes []*cdp.Node) []string
 		}
 	}
 
+	
 	return results
 }
