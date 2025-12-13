@@ -1,30 +1,37 @@
 package database
 
 import (
-   "fmt"
-   "database/sql"
-   "os"
-   _ "github.com/lib/pq"
+    "fmt"
+    "os"
+    "gorm.io/driver/postgres"
+    "gorm.io/gorm"
+    "github.com/chandhuDev/JobLoop/internal/schema"
+    "gorm.io/gorm/logger"
 )
 
-func ConnectDatabase() {
-   user := os.Getenv("DB_USER")
-   pass := os.Getenv("DB_PASS")
+var DB *gorm.DB
 
-   databaseOptions := fmt.Sprintf(
-		"user=%s password=%s dbname=jobloop sslmode=disable",
-		user, pass,
-	)
+func ConnectDatabase() error {
+    user := os.Getenv("DB_USER")
+    pass := os.Getenv("DB_PASS")
 
-   db, err := sql.Open("postgres", databaseOptions)
+    dsn := fmt.Sprintf(
+        "host=localhost user=%s password=%s dbname=jobloop sslmode=disable",
+         user, pass,
+    )
 
-   if err != nil {
-      fmt.Printf("DB connect failed: %v — continuing in debug mode\n", err)
-   }
-   defer db.Close()
+    db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{
+      Logger: logger.Default.LogMode(logger.Info),
+   })
+    if err != nil {
+        return fmt.Errorf("db connect failed: %w", err)
+    }
 
-   if err := db.Ping(); err != nil {
-	   fmt.Printf("failed to ping the server", err)
-   
-   }
+    DB = db
+    return nil
+}
+
+func CreateSchema() error {
+   err := DB.AutoMigrate(&schema.SeedCompanies{}, &schema.TestimonialCompanies{})
+   return err
 }
