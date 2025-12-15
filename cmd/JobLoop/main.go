@@ -16,9 +16,10 @@ func main() {
    }
 
    browserscraper.LaunchBrowser()
-   database.ConnectDatabase()
+   db := database.ConnectDatabase()
    
    if err := database.CreateSchema(); err!= nil {
       log.Fatalf("Failed to create schema: %v", err)
    }
+   _ := database.SetUpDatabase(db)
 }

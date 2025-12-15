@@ -2,12 +2,13 @@ package schema
 
 import (
     "time"
+	"gorm.io/gorm"
 )
 
 type SeedCompanies struct {
 	ID  uint `gorm:"primaryKey"`
-	CompanyName string 
-	CompanyURL string
+	CompanyName string `gorm:"index"`
+	CompanyURL string 
 	Visited bool
 	Time time.Time
 	TestimonialCompanies []TestimonialCompanies `gorm:"foreignKey:SeedCompanyID"`
@@ -16,5 +17,9 @@ type SeedCompanies struct {
 type TestimonialCompanies struct {
 	ID  uint `gorm:"primaryKey"`
 	SeedCompanyID uint
-	CompanyName string
+	CompanyName string `gorm:"index"`
+}
+
+type DatabaseRepository struct {
+	DB *gorm.DB
 }

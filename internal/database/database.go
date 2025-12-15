@@ -11,7 +11,7 @@ import (
 
 var DB *gorm.DB
 
-func ConnectDatabase() error {
+func ConnectDatabase() *gorm.DB {
     user := os.Getenv("DB_USER")
     pass := os.Getenv("DB_PASS")
 
@@ -24,11 +24,11 @@ func ConnectDatabase() error {
       Logger: logger.Default.LogMode(logger.Info),
    })
     if err != nil {
-        return fmt.Errorf("db connect failed: %w", err)
+        fmt.Printf("db connect failed: %w", err)
     }
-
+    
     DB = db
-    return nil
+    return db
 }
 
 func CreateSchema() error {

@@ -16,13 +16,18 @@ type ScrapeConfig struct {
 	WaitTime time.Duration
 }
 
+type CompanyResult struct {
+    Name string
+	URL string
+}
+
+
 func LaunchBrowser() {
 	configs := []ScrapeConfig{
-	
-		{
+	    {
 			Name:     "Y Combinator",
 			URL:      "https://www.ycombinator.com/companies",
-			Selector: `a[href^="/companies/"]`,
+			Selector: `span[class^="_coName_i9oky_470"]`,
 			WaitTime: 5 * time.Second,
 		},
 	}
@@ -54,19 +59,16 @@ func LaunchBrowser() {
 		go func(cfg ScrapeConfig) {
 			defer wg.Done()
 			defer tabCancel()
-			scrapeLinks(tabContext, cfg)
+			results:=scrapeLinks(tabContext, cfg)
 		}(config)
 	}
 
 	wg.Wait()
 }
 
-func scrapeLinks(ctx context.Context, config ScrapeConfig) {
-	fmt.Printf("Opening %s...\n", config.Name)
-
-
+func scrapeLinks(ctx context.Context, config ScrapeConfig) []CompanyResult {
 	var nodes []*cdp.Node
-
+    
 	err := chromedp.Run(ctx,
 		chromedp.Navigate(config.URL),
 		chromedp.Sleep(config.WaitTime),
@@ -75,34 +77,43 @@ func scrapeLinks(ctx context.Context, config ScrapeConfig) {
 
 	if err != nil {
 		fmt.Printf("Error navigating to %s: %v\n", config.Name, err)
-		return
+		return []CompanyResult{}
 	}
 
-	results := extractTextFromNodes(ctx, nodes)
+	var results []CompanyResult
 
-	fmt.Printf("\n=== %s Results (%d found) ===\n", config.Name, len(results))
-	for i, text := range results {
-		fmt.Printf("%d → %s\n", i+1, text)
-	}
-}
-
-func extractTextFromNodes(parentCtx context.Context, nodes []*cdp.Node) []string {
-	var results []string
-
-	for _, node := range nodes {
-		var text string
-		err := chromedp.Run(parentCtx,
-			chromedp.Text(node.FullXPath(), &text, chromedp.NodeVisible),
+	for i := 0; i < len(nodes); i++ {
+		var name string
+		chromedp.Run(ctx,
+			chromedp.Text(nodes[i].FullXPath(), &name, chromedp.NodeVisible),
 		)
-		if err != nil {
-			continue
-		}
-		
-		if text != "" {
-			results = append(results, text)
-		}
-	}
 
-	
+		chromedp.Run(ctx,
+			chromedp.Click(nodes[i].FullXPath()),
+			chromedp.WaitReady("body"),
+			chromedp.Sleep(config.WaitTime),
+		)
+
+		var companyURL string
+		chromedp.Run(ctx,
+			chromedp.AttributeValue(`div.group a`, "href", &companyURL, nil),
+		)
+		
+		results = append(results, CompanyResult{
+			Name: name,
+			URL:  companyURL,
+		})
+
+		if i == 1 {
+			break
+		}
+
+		chromedp.Run(ctx,
+			chromedp.Navigate("https://www.ycombinator.com/companies"),
+			chromedp.Sleep(config.WaitTime),
+			chromedp.Nodes(config.Selector, &nodes, chromedp.AtLeast(0)),
+		)
+
+	}
 	return results
 }
