@@ -1,4 +1,4 @@
-package database
+package repository
 
 import (
 	"gorm.io/gorm"
@@ -6,16 +6,6 @@ import (
 	"time"
 )
 
-func SetUpDatabase(database *gorm.DB) *DatabaseRepository {
-	return schema.&DatabaseRepository{DB: database}
-}
-
-funct CreateTestimonialCompanyRepository(SeedCompanyID uint, CompanyName string ) []schema.TestimonialCompanies {
-	return []schema.TestimonialCompanies{
-		SeedCompanyID: SeedCompanyID,
-		CompanyName: CompanyName,
-	}
-}
 
 func CreateSeedCompanyRepository(CompanyName string, CompanyURL string, TestimonialArray []schema.TestimonialCompanies) schema.SeedCompanies {
 	return schema.SeedCompanies{
@@ -25,7 +15,6 @@ func CreateSeedCompanyRepository(CompanyName string, CompanyURL string, Testimon
 		Time:        time.Now(),
 		TestimonialCompanies: TestimonialArray,
 	}
-
 }
 
 func CreateSeedCompany(seedCompany schema.SeedCompanies, DB *gorm.DB) error{
@@ -33,8 +22,6 @@ func CreateSeedCompany(seedCompany schema.SeedCompanies, DB *gorm.DB) error{
    if result.Error !=nil {
 	return result.Error
    }
-	fmt.Printf("%s rows inserted to table", result.RowsAffected)
-   
+   fmt.Printf("%s rows inserted to table", result.RowsAffected)
    return nil
 }
-
