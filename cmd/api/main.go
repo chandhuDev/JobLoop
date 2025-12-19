@@ -27,15 +27,23 @@ func main() {
 
 
 
-   SeedCompanyConfig := seed_company_service.SeedCompanyConfig{
+   SeedCompanyConfigs := seed_company_service.SeedCompanyConfig{{
       Name : "Y Combinator",
       URL : "http://www.ycombinator.com/companies",
       Selector : "",
       WaitTime : 5 * time.Second,
+     },
+   //   {
+   //    Name : "Peer list",
+   //    URL : "https://peerlist.io/jobs",
+   //    Selector : "a[href^="/company/"][href*="/careers/"]",
+   //    WaitTime : 5 * time.Second,
+   //   }
    }
    seedCompanyScraper := seed_company_service.NewSeedCompanyScraper(SeedCompanyConfig)
-   err := seedCompanyScraper.ScrapeSeedCompanies()
+   seedCompanyResultArray := seedCompanyScraper.SeedCompanyConfigs(browser, SeedCompanyConfig)
 
+   
 
 
 

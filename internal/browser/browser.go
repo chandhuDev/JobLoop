@@ -48,15 +48,12 @@ func CreateNewBrowser(options Options) (*Browser, err) {
 	}, nil
 }
 
-func (b *Browser) RunInNewTab(actions ...chromedp.Action) context.Context {
+func (b *Browser) RunInNewTab(actions ...chromedp.Action) context.Context, context.CancelFunc {
 	tabContext, tabCancel := chromedp.NewContext(b.browserContext)
-	defer tabCancel()
-	return tabContext
+	return tabContext, tabCancel
 }
 
 func (b *Browser) Close() {
 	b.browserCancel()
 	b.allocCancel()
 }
-
-

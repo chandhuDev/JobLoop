@@ -4,8 +4,11 @@ import (
 	"fmt"
 	"sync"
 	"time"
+	"context"
 	"github.com/chromedp/chromedp"
 	"github.com/chromedp/cdproto/cdp"
+	"github.com/chandhuDev/JobLoop/internal/browser"
+	"github.com/chandhuDev/JobLoop/internal/repository/seed_repo"
 )
 
 type SeedCompanyConfig struct {
@@ -24,48 +27,69 @@ func NewSeedCompanyScraper(companyConfig SeedCompanyConfig) *SeedCompanyConfig {
 	return &SeedCompanyConfig{companyConfig.Name, companyConfig.URL, companyConfig.Selector, companyConfig.WaitTime}
 }
 
-func (sj *SeedCompanyConfig) ScrapeSeedCompanies() error {
+func SeedCompanyConfigs(browser *browser.Browser,seedCompanies []SeedCompanyConfig) []SeedCompanyResult {
 	var wg sync.WaitGroup
-	wg.Add(1)
-	defer wg.Done()
-	err := sj.scrapeAndStoreSeedCompanies(sj)
+	var seedCompanyResults []SeedCompanyResult
+
+    for i:=0; i < len(seedCompanies); i++ {
+		wg.Add(1)
+		go func(sc SeedCompanyConfig) {
+			defer wg.Done()
+            tabContext, tabCancel := browser.RunInNewTab()
+			defer tabCancel()
+			scraper := NewSeedCompanyScraper(sc)
+		    seedCompanyResults := scraper.ScrapeSeedCompanies(tabContext)
+		    
+		}(seedCompanies[i])
+	}
+	wg.Wait()
+    return seedCompanyResults
 }
 
-func (sj *SeedCompanyConfig) scrapeAndStoreSeedCompanies() ([]SeedCompanyResult ,error) {
+func (sc *SeedCompanyConfig) ScrapeSeedCompanies(ctx context.Context) []SeedCompanyResult {
 	var nodes []*cdp.Node
-    var results []SeedCompanyResult
+	var results []SeedCompanyResult
 
-	fmt.Println("Scraping seed companies for:", sj.Name)
+	fmt.Println("Scraping seed companies for:", sc.Name)
 
-    for i := 0; i < len(nodes); i++ {
+	chromedp.Run(ctx,
+		chromedp.Navigate(sc.URL),
+		chromedp.Sleep(sc.WaitTime),
+		chromedp.Nodes(sc.Selector, &nodes, chromedp.AtLeast(0)),
+	)
+
+    for i:=0; i < len(nodes); i++ {
+		
 		var name string
 		chromedp.Run(ctx,
 			chromedp.Text(nodes[i].FullXPath(), &name, chromedp.NodeVisible),
 		)
 
-		chromedp.Run(ctx,
+		_, err := chromedp.RunResponse(ctx,
 			chromedp.Click(nodes[i].FullXPath()),
-			chromedp.WaitReady("body"),
-			chromedp.Sleep(config.WaitTime),
 		)
+		if err != nil {
+			fmt.Println("error in clicking testimonial link:", err)
+		}
 
-		var companyURL string
-		chromedp.Run(ctx,
-			chromedp.AttributeValue(`div.group a`, "href", &companyURL, nil),
+		var url string
+		err:=chromedp.Run(ctx,
+			chromedp.AttributeValue(`div.group a`, "href", &url, nil),
 		)
-		
-		results = append(results, CompanyResult{
-			Name: name,
-			URL:  companyURL,
+		if err!=nil {
+			fmt.Println("error in getting testimonial url:", err)
+		}
+        results = append(results, SeedCompanyResult{
+			CompanyName: name,
+			CompanyURL: url,
 		})
 
-		chromedp.Run(ctx,
-			chromedp.Navigate(sj.URL),
-			chromedp.Sleep(sj.WaitTime),
-			chromedp.Nodes(sj.Selector, &nodes, chromedp.AtLeast(0)),
+		err:= chromedp.Run(ctx, 
+			chromedp.NavigateBack(),
+			chromedp.WaitVisible(sc.Selector)		
+			chromedp.Nodes(sc.Selector, &nodes, chromedp.AtLeast(0)),
 		)
-
+      
 	}
-
-	return results, nil
+	return results
 }

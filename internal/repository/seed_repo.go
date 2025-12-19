@@ -3,14 +3,15 @@ package repository
 import (
 	"gorm.io/gorm"
 	"github.com/chandhuDev/JobLoop/internal/schema"
+	"github.com/chandhuDev/JobLoop/internal/service/seed_company_service"
 	"time"
 )
 
 
-func CreateSeedCompanyRepository(CompanyName string, CompanyURL string, TestimonialArray []schema.TestimonialCompanies) schema.SeedCompanies {
+func CreateSeedCompanyRepository(cd *seed_company_service.CompanyResult, TestimonialArray []schema.TestimonialCompanies) schema.SeedCompanies {
 	return schema.SeedCompanies{
-		CompanyName: CompanyName,
-		CompanyURL:  CompanyURL,
+		CompanyName: cd.CompanyName,
+		CompanyURL:  cd.CompanyURL,
 		Visited:     false,
 		Time:        time.Now(),
 		TestimonialCompanies: TestimonialArray,
