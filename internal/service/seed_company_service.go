@@ -8,7 +8,6 @@ import (
 	"github.com/chromedp/chromedp"
 	"github.com/chromedp/cdproto/cdp"
 	"github.com/chandhuDev/JobLoop/internal/browser"
-	"github.com/chandhuDev/JobLoop/internal/repository/seed_repo"
 )
 
 type SeedCompanyConfig struct {
@@ -24,23 +23,28 @@ type SeedCompanyResult struct {
 }
 
 func NewSeedCompanyScraper(companyConfig SeedCompanyConfig) *SeedCompanyConfig {
-	return &SeedCompanyConfig{companyConfig.Name, companyConfig.URL, companyConfig.Selector, companyConfig.WaitTime}
+	return &SeedCompanyConfig{
+		Name : companyConfig.Name, 
+		URL : companyConfig.URL, 
+		Selector : companyConfig.Selector, 
+		WaitTime : companyConfig.WaitTime,
+	}
 }
 
-func SeedCompanyConfigs(browser *browser.Browser,seedCompanies []SeedCompanyConfig) []SeedCompanyResult {
+func SeedCompanyConfigs(browser browser.Browser,scc []SeedCompanyConfig) []SeedCompanyResult {
 	var wg sync.WaitGroup
 	var seedCompanyResults []SeedCompanyResult
 
-    for i:=0; i < len(seedCompanies); i++ {
+    for i:=0; i < len(scc); i++ {
 		wg.Add(1)
 		go func(sc SeedCompanyConfig) {
 			defer wg.Done()
             tabContext, tabCancel := browser.RunInNewTab()
 			defer tabCancel()
 			scraper := NewSeedCompanyScraper(sc)
-		    seedCompanyResults := scraper.ScrapeSeedCompanies(tabContext)
+		    seedCompanyResults = scraper.ScrapeSeedCompanies(tabContext)
 		    
-		}(seedCompanies[i])
+		}(scc[i])
 	}
 	wg.Wait()
     return seedCompanyResults
@@ -73,20 +77,24 @@ func (sc *SeedCompanyConfig) ScrapeSeedCompanies(ctx context.Context) []SeedComp
 		}
 
 		var url string
-		err:=chromedp.Run(ctx,
+		err2 := chromedp.Run(ctx,
 			chromedp.AttributeValue(`div.group a`, "href", &url, nil),
 		)
-		if err!=nil {
-			fmt.Println("error in getting testimonial url:", err)
+		if err2!=nil {
+			fmt.Println("error in getting testimonial url:", err2)
 		}
         results = append(results, SeedCompanyResult{
 			CompanyName: name,
 			CompanyURL: url,
 		})
 
-		err:= chromedp.Run(ctx, 
+		if i == 2 {
+			break
+		}
+
+		chromedp.Run(ctx, 
 			chromedp.NavigateBack(),
-			chromedp.WaitVisible(sc.Selector)		
+			chromedp.WaitVisible(sc.Selector),		
 			chromedp.Nodes(sc.Selector, &nodes, chromedp.AtLeast(0)),
 		)
       

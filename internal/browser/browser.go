@@ -3,19 +3,15 @@ package browser
 import (
 	"fmt"
 	"context"
-	"sync"
-	"time"
 	"github.com/chromedp/chromedp"
-	"github.com/chromedp/cdproto/cdp"
-	"github.com/chandhuDev/JobLoop/internal/schema"
 )
 
 type Browser struct {
-	allocCtx    context.Context
+	allocContext    context.Context
 	allocCancel context.CancelFunc
-	browserCtx  context.Context
+	browserContext  context.Context
 	browserCancel context.CancelFunc
-	opts Options
+	options Options
 }
 
 type Options struct {
@@ -25,18 +21,18 @@ type Options struct {
     WindowHeight int
 }
 
-func CreateNewBrowser(options Options) (*Browser, err) {
-    execOptions := append(chromdep.DefaultExecAllocatorOptions[:],
-	                chromedp.Flag("headless", opts.Headless),
-					chromedp.Flag("disable-gpu", opts.Disbale_gpu)
-					chromedp.WindowSize(opts.WindowWidth, opts.WindowHeight)
+func CreateNewBrowser(options Options) *Browser {
+    execOptions := append(chromedp.DefaultExecAllocatorOptions[:],
+	                chromedp.Flag("headless", options.Headless),
+					chromedp.Flag("disable-gpu", options.Disbale_gpu),
+					chromedp.WindowSize(options.WindowWidth, options.WindowHeight),
     )
-    allocContext, allocCancel := chromdep.NewExecAllocator(context.Background(), execpOptions...)
+    allocContext, allocCancel := chromedp.NewExecAllocator(context.Background(), execOptions...)
 	browserContext, browserCancel := chromedp.NewContext(allocContext)
 
-	if err := chromdep.Run(browserContext); err != nil {
+	if err := chromedp.Run(browserContext); err != nil {
 		fmt.Printf("Error launching browser: %v\n", err)
-		return nil, err
+		return nil
 	}
 
 	return &Browser{
@@ -44,11 +40,11 @@ func CreateNewBrowser(options Options) (*Browser, err) {
 		allocCancel : allocCancel,
 		browserContext : browserContext,
 		browserCancel : browserCancel,
-		options : options
-	}, nil
+		options : options,
+	}
 }
 
-func (b *Browser) RunInNewTab(actions ...chromedp.Action) context.Context, context.CancelFunc {
+func (b *Browser) RunInNewTab(actions ...chromedp.Action) (context.Context, context.CancelFunc) {
 	tabContext, tabCancel := chromedp.NewContext(b.browserContext)
 	return tabContext, tabCancel
 }

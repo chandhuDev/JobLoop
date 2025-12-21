@@ -5,9 +5,10 @@ import (
    "time"
 	"github.com/chandhuDev/JobLoop/internal/browser"
 	"github.com/chandhuDev/JobLoop/internal/database"
-	"github.com/chandhuDev/JobLoop/internal/service/seed_company_service"
+	"github.com/chandhuDev/JobLoop/internal/service"
    "log"
    "github.com/joho/godotenv"
+   "github.com/chandhuDev/JobLoop/internal/config/vision"
 )
 
 func main() {
@@ -22,29 +23,29 @@ func main() {
       WindowWidth : 1920,
       WindowHeight : 1080,
    }
-   browser, err := browser.CreateNewBrowser(browserOptions)
+   browser := browser.CreateNewBrowser(browserOptions)
    defer browser.Close()
 
-
-
-   SeedCompanyConfigs := seed_company_service.SeedCompanyConfig{{
+   SeedCompanyConfigs := service.SeedCompanyConfig{{
       Name : "Y Combinator",
       URL : "http://www.ycombinator.com/companies",
       Selector : "",
       WaitTime : 5 * time.Second,
      },
-   //   {
-   //    Name : "Peer list",
-   //    URL : "https://peerlist.io/jobs",
-   //    Selector : "a[href^="/company/"][href*="/careers/"]",
-   //    WaitTime : 5 * time.Second,
-   //   }
+     {
+      Name : "Peer list",
+      URL : "https://peerlist.io/jobs",
+      Selector : "a[href^="/company/"][href*="/careers/"]",
+      WaitTime : 5 * time.Second,
+     }
    }
-   seedCompanyScraper := seed_company_service.NewSeedCompanyScraper(SeedCompanyConfig)
-   seedCompanyResultArray := seedCompanyScraper.SeedCompanyConfigs(browser, SeedCompanyConfig)
+ 
+   seedCompanyResultArray := service.SeedCompanyConfigs(browser, SeedCompanyConfigs)
+   fmt.Println("Seed Company Results:", seedCompanyResultArray)
 
-   
-
+   visionInstance, err := vision.CreateVisionInit(context.Background())
+   defer visionInstance.Close()
+   service.ScrapeTestimonial(browser, visionInstance, seedCompanyResultArray)
 
 
    db := database.ConnectDatabase(browserOptions)
