@@ -24,7 +24,7 @@ func ConnectDatabase() *gorm.DB {
       Logger: logger.Default.LogMode(logger.Info),
    })
     if err != nil {
-        fmt.Printf("db connect failed: %w", err)
+        fmt.Println("db connect failed: %w", err)
     }
     
     DB = db

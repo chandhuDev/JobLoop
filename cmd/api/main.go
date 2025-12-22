@@ -9,12 +9,13 @@ import (
    "log"
    "github.com/joho/godotenv"
    "github.com/chandhuDev/JobLoop/internal/config/vision"
+   "context"
 )
 
 func main() {
    fmt.Println("Starting JobLoop")
    if err := godotenv.Load(); err != nil {
-	   log.Println("No .env file found")
+	log.Println("No .env file found")
    }
 
    browserOptions := browser.Options{
@@ -26,31 +27,33 @@ func main() {
    browser := browser.CreateNewBrowser(browserOptions)
    defer browser.Close()
 
-   SeedCompanyConfigs := service.SeedCompanyConfig{{
-      Name : "Y Combinator",
-      URL : "http://www.ycombinator.com/companies",
-      Selector : "",
-      WaitTime : 5 * time.Second,
+   SeedCompanyConfigs := []service.SeedCompanyConfig{
+     {
+      Name: "Y Combinator",
+      URL: "http://www.ycombinator.com/companies",
+      Selector: "",
+      WaitTime: 5 * time.Second,
      },
      {
-      Name : "Peer list",
-      URL : "https://peerlist.io/jobs",
-      Selector : "a[href^="/company/"][href*="/careers/"]",
-      WaitTime : 5 * time.Second,
-     }
+      Name: "Peer list",
+      URL: "https://peerlist.io/jobs",
+      Selector: `a[href^="/company/"][href*="/careers/"]`,
+      WaitTime: 5 * time.Second,
+     },
    }
  
    seedCompanyResultArray := service.SeedCompanyConfigs(browser, SeedCompanyConfigs)
    fmt.Println("Seed Company Results:", seedCompanyResultArray)
 
-   visionInstance, err := vision.CreateVisionInit(context.Background())
+   visionInstance, _ := vision.CreateVisionInit(context.Background())
    defer visionInstance.Close()
-   service.ScrapeTestimonial(browser, visionInstance, seedCompanyResultArray)
+   vision := service.SetUpVision(visionInstance)
+   service.ScrapeTestimonial(browser, *vision, seedCompanyResultArray)
 
 
-   db := database.ConnectDatabase(browserOptions)
+   db := database.ConnectDatabase()
    if err := database.CreateSchema(); err!= nil {
       log.Fatalf("Failed to create schema: %v", err)
    }
-   _ := database.SetUpDatabase(db)
+   // _ := database.SetUpDatabase(db)
 }

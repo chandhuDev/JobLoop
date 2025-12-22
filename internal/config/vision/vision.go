@@ -1,8 +1,9 @@
 package vision
 
 import (
-	"fmt"
 	"context"
+	"fmt"
+
 	vision "cloud.google.com/go/vision/apiv1"
 )
 
