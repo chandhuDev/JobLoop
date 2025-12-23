@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"fmt"
 	"sync"
 
@@ -12,14 +13,19 @@ import (
 func ScrapeTestimonial(browser *browser.Browser, vision VisionConfig, seedCompanyList []SeedCompanyResult) {
 	var nodes []*cdp.Node
 	var wg sync.WaitGroup
-
+	xpath := `
+	(
+	  //*[contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'trust')]
+		/following::*[count(.//img) >= 3][1]
+	)//img
+	`
 	for i := 0; i < len(seedCompanyList); i++ {
 		tabContext, tabCancel := browser.RunInNewTab()
 
 		err := chromedp.Run(tabContext,
 			chromedp.Navigate(seedCompanyList[i].CompanyURL),
 			chromedp.WaitVisible("body"),
-			chromedp.Nodes(`//*[contains(text(), "Trusted by")]/ancestor::*[count(.//img) > 1][1]//img`, &nodes, chromedp.AtLeast(0)),
+			chromedp.Nodes(xpath, &nodes, chromedp.BySearch, chromedp.AtLeast(0)),
 		)
 
 		if err != nil {
@@ -36,9 +42,10 @@ func ScrapeTestimonial(browser *browser.Browser, vision VisionConfig, seedCompan
 		var requestsArray []string
 		for j := 0; j < len(nodes); j++ {
 			var fullURL string
-			chromedp.Run(tabContext,
-				chromedp.JavascriptAttribute(nodes[j].FullXPath(), "src", &fullURL),
-			)
+			fullURL = getAttr(tabContext, nodes[j].FullXPath(), "src")
+			if fullURL == "" {
+				fullURL = getAttr(tabContext, nodes[j].FullXPath(), "data-src")
+			}
 			requestsArray = append(requestsArray, fullURL)
 		}
 
@@ -51,4 +58,16 @@ func ScrapeTestimonial(browser *browser.Browser, vision VisionConfig, seedCompan
 		}(requestsArray)
 	}
 	wg.Wait()
+}
+
+func getAttr(ctx context.Context, xpath string, attributeName string) string {
+	var url string
+	chromedp.Run(ctx, chromedp.AttributeValue(xpath, attributeName, &url, nil, chromedp.BySearch))
+	if url != "" {
+		fmt.Println("Error getting attribute value from nodes", url)
+		return url
+	}
+	chromedp.Run(ctx, chromedp.JavascriptAttribute(xpath, attributeName, &url))
+
+	return url
 }
