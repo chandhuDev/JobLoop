@@ -43,7 +43,8 @@ func ScrapeTestimonial(browser *browser.Browser, vision VisionConfig, seedCompan
 		for j := 0; j < len(nodes); j++ {
 			var fullURL string
 			fullURL = getAttr(tabContext, nodes[j].FullXPath(), "src")
-			if fullURL == "" {
+			fmt.Println("Found testimonial image URL:", fullURL)
+			if fullURL == "" || fullURL == "null" {
 				fullURL = getAttr(tabContext, nodes[j].FullXPath(), "data-src")
 			}
 			requestsArray = append(requestsArray, fullURL)
@@ -62,12 +63,12 @@ func ScrapeTestimonial(browser *browser.Browser, vision VisionConfig, seedCompan
 
 func getAttr(ctx context.Context, xpath string, attributeName string) string {
 	var url string
-	chromedp.Run(ctx, chromedp.AttributeValue(xpath, attributeName, &url, nil, chromedp.BySearch))
-	if url != "" {
-		fmt.Println("Error getting attribute value from nodes", url)
-		return url
-	}
+	// chromedp.Run(ctx, chromedp.AttributeValue(xpath, attributeName, &url, nil, chromedp.BySearch))
+	// if url != "" {
+	// 	fmt.Println("Error getting attribute value from nodes", url)
+	// 	return url
+	// }
 	chromedp.Run(ctx, chromedp.JavascriptAttribute(xpath, attributeName, &url))
-
+     fmt.Println("Extracted attribute", attributeName, "with value:", url)
 	return url
 }

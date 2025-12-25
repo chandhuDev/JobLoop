@@ -28,18 +28,18 @@ func main() {
    defer browser.Close()
 
    SeedCompanyConfigs := []service.SeedCompanyConfig{
-     {
-      Name: "Y Combinator",
-      URL: "http://www.ycombinator.com/companies",
-      Selector: `span[class^="_coName_i9oky_470"]`,
-      WaitTime: 10 * time.Second,
-     },
    //   {
-   //    Name: "Peer list",
-   //    URL: "https://peerlist.io/jobs",
-   //    Selector: `a[href^="/company/"][href*="/careers/"]`,
-   //    WaitTime: 5 * time.Second,
+   //    Name: "Y Combinator",
+   //    URL: "http://www.ycombinator.com/companies",
+   //    Selector: `span[class^="_coName_i9oky_470"]`,
+   //    WaitTime: 10 * time.Second,
    //   },
+     {
+      Name: "Peer list",
+      URL: "https://peerlist.io/jobs",
+      Selector: `a[href^="/company/"][href*="/careers/"]`,
+      WaitTime: 5 * time.Second,
+     },
    }
  
    seedCompanyResultArray := service.SeedCompanyConfigs(browser, SeedCompanyConfigs)

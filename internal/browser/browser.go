@@ -1,33 +1,35 @@
 package browser
 
 import (
-	"fmt"
 	"context"
+	"fmt"
+
 	"github.com/chromedp/chromedp"
 )
 
 type Browser struct {
-	allocContext    context.Context
-	allocCancel context.CancelFunc
-	browserContext  context.Context
-	browserCancel context.CancelFunc
-	options Options
+	allocContext   context.Context
+	allocCancel    context.CancelFunc
+	browserContext context.Context
+	browserCancel  context.CancelFunc
+	options        Options
 }
 
 type Options struct {
-	Headless bool
-	Disbale_gpu bool
-	WindowWidth int
-    WindowHeight int
+	Headless     bool
+	Disbale_gpu  bool
+	WindowWidth  int
+	WindowHeight int
 }
 
 func CreateNewBrowser(options Options) *Browser {
-    execOptions := append(chromedp.DefaultExecAllocatorOptions[:],
-	                chromedp.Flag("headless", options.Headless),
-					chromedp.Flag("disable-gpu", options.Disbale_gpu),
-					chromedp.WindowSize(options.WindowWidth, options.WindowHeight),
-    )
-    allocContext, allocCancel := chromedp.NewExecAllocator(context.Background(), execOptions...)
+	execOptions := append(chromedp.DefaultExecAllocatorOptions[:],
+		chromedp.Flag("headless", options.Headless),
+		chromedp.Flag("disable-gpu", options.Disbale_gpu),
+		chromedp.Flag("disable-blink-features", "AutomationControlled"),
+		chromedp.WindowSize(options.WindowWidth, options.WindowHeight),
+	)
+	allocContext, allocCancel := chromedp.NewExecAllocator(context.Background(), execOptions...)
 	browserContext, browserCancel := chromedp.NewContext(allocContext)
 
 	if err := chromedp.Run(browserContext); err != nil {
@@ -36,11 +38,11 @@ func CreateNewBrowser(options Options) *Browser {
 	}
 
 	return &Browser{
-		allocContext : allocContext,
-		allocCancel : allocCancel,
-		browserContext : browserContext,
-		browserCancel : browserCancel,
-		options : options,
+		allocContext:   allocContext,
+		allocCancel:    allocCancel,
+		browserContext: browserContext,
+		browserCancel:  browserCancel,
+		options:        options,
 	}
 }
 
