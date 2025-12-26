@@ -2,6 +2,7 @@ package service
 
 import (
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -9,6 +10,7 @@ import (
 	"github.com/chandhuDev/JobLoop/internal/browser"
 	"github.com/chromedp/cdproto/cdp"
 	"github.com/chromedp/chromedp"
+	"google.golang.org/api/customsearch/v1"
 )
 
 type SeedCompanyConfig struct {
@@ -32,7 +34,7 @@ func NewSeedCompanyScraper(companyConfig SeedCompanyConfig) *SeedCompanyConfig {
 	}
 }
 
-func SeedCompanyConfigs(browser *browser.Browser, scc []SeedCompanyConfig) []SeedCompanyResult {
+func SeedCompanyConfigs(browser *browser.Browser, scc []SeedCompanyConfig, search *customsearch.Service) []SeedCompanyResult {
 	var wg sync.WaitGroup
 	var seedCompanyResults []SeedCompanyResult
 
@@ -42,7 +44,8 @@ func SeedCompanyConfigs(browser *browser.Browser, scc []SeedCompanyConfig) []See
 			defer wg.Done()
 
 			scraper := NewSeedCompanyScraper(sc)
-			seedCompanyResults = scraper.ScrapeSeedCompanies(browser)
+			seedCompanyResults = scraper.ScrapeSeedCompanies(browser, search)
+			fmt.Println("Scraping results of seed companies:", seedCompanyResults)
 
 		}(scc[i])
 	}
@@ -50,11 +53,11 @@ func SeedCompanyConfigs(browser *browser.Browser, scc []SeedCompanyConfig) []See
 	return seedCompanyResults
 }
 
-func (sc *SeedCompanyConfig) ScrapeSeedCompanies(b *browser.Browser) []SeedCompanyResult {
+func (sc *SeedCompanyConfig) ScrapeSeedCompanies(b *browser.Browser, search *customsearch.Service) []SeedCompanyResult {
 	var nodes []*cdp.Node
 	var results []SeedCompanyResult
 	var names []string
-	var wg sync.WaitGroup
+	engine := os.Getenv("GOOGLE_SEARCH_ENGINE")
 
 	fmt.Println("Scraping seed companies for:", sc)
 	if sc.Name == "Peer list" {
@@ -62,7 +65,8 @@ func (sc *SeedCompanyConfig) ScrapeSeedCompanies(b *browser.Browser) []SeedCompa
 		defer tabCancel()
 		chromedp.Run(tabContext,
 			chromedp.Navigate(sc.URL),
-			chromedp.Sleep(sc.WaitTime),
+			chromedp.WaitReady("body"),
+			chromedp.Sleep(2*time.Second),
 			chromedp.Nodes(sc.Selector, &nodes, chromedp.AtLeast(0)),
 		)
 		for i := 0; i < len(nodes); i++ {
@@ -70,7 +74,8 @@ func (sc *SeedCompanyConfig) ScrapeSeedCompanies(b *browser.Browser) []SeedCompa
 			pXPath := nodes[i].FullXPath() + "/div[2]//p"
 
 			err := chromedp.Run(tabContext,
-				chromedp.Text(pXPath, &name, chromedp.NodeVisible),
+				chromedp.WaitReady(pXPath, chromedp.BySearch),
+				chromedp.Text(pXPath, &name, chromedp.BySearch),
 			)
 			if err != nil {
 				continue
@@ -81,42 +86,19 @@ func (sc *SeedCompanyConfig) ScrapeSeedCompanies(b *browser.Browser) []SeedCompa
 			names = append(names, lastWord(name))
 
 		}
-		ch := make(chan SeedCompanyResult, len(names))
 
-		for _, companyName := range names {
-			wg.Add(1)
-			go func(c string) {
-				var companyURL string
+		fmt.Println("searching for company:", len(names))
 
-				defer wg.Done()
-				newtab, newcancel := b.RunInNewTab()
-				defer newcancel()
-				chromedp.Run(newtab,
-					chromedp.Navigate("https://www.google.com"),
-					chromedp.WaitVisible(`textarea[name="q"]`, chromedp.ByQuery),
-					chromedp.SendKeys(`textarea[name="q"]`, c+"\n", chromedp.ByQuery),
-					chromedp.WaitVisible(`div#search`, chromedp.ByQuery),
-
-					chromedp.Sleep(5*time.Second),
-					chromedp.Click(`(//div[@id='search']//a[h3])[1]`, chromedp.BySearch),
-					chromedp.Sleep(3*time.Second),
-
-					chromedp.Location(&companyURL),
-				)
-				ch <- SeedCompanyResult{
-					CompanyURL:  companyURL,
-					CompanyName: c,
-				}
-			}(companyName)
-
-		}
-		go func() {
-			wg.Wait()
-			close(ch)
-		}()
-		for result := range ch {
-			fmt.Println("Peer list result:", result)
-			results = append(results, result)
+		for _, c := range names {
+			v, e := search.Cse.List().Q(c).Cx(engine).Do()
+			if e != nil {
+				fmt.Println("error in search:", e)
+			}
+			fmt.Println("search results for ", c, ":", v.Items[0].Link)
+			results = append(results, SeedCompanyResult{
+				CompanyName: c,
+				CompanyURL:  v.Items[0].Link,
+			})
 		}
 
 	} else {
@@ -134,45 +116,41 @@ func (sc *SeedCompanyConfig) ScrapeSeedCompanies(b *browser.Browser) []SeedCompa
 
 			var name string
 
-			if sc.Name == "Peer list" {
-
-			} else {
-				chromedp.Run(tabContext,
-					chromedp.Text(nodes[i].FullXPath(), &name, chromedp.NodeVisible),
-				)
-				_, err := chromedp.RunResponse(tabContext,
-					chromedp.Click(nodes[i].FullXPath()),
-				)
-				if err != nil {
-					fmt.Println("error in clicking testimonial link:", err)
-				}
-
-				var url string
-				err2 := chromedp.Run(tabContext,
-					chromedp.AttributeValue(`div.group a`, "href", &url, nil),
-				)
-				if err2 != nil {
-					fmt.Println("error in getting testimonial url:", err2)
-				}
-				results = append(results, SeedCompanyResult{
-					CompanyName: name,
-					CompanyURL:  url,
-				})
-
-				fmt.Println("Clicked on company:", name, "URL:", url)
-
-				if i == 2 {
-					break
-				}
-
-				chromedp.Run(tabContext,
-					chromedp.Navigate(sc.URL),
-					chromedp.Sleep(sc.WaitTime),
-					chromedp.Nodes(sc.Selector, &nodes, chromedp.AtLeast(0)),
-				)
+			chromedp.Run(tabContext,
+				chromedp.Text(nodes[i].FullXPath(), &name, chromedp.NodeVisible),
+			)
+			_, err := chromedp.RunResponse(tabContext,
+				chromedp.Click(nodes[i].FullXPath()),
+			)
+			if err != nil {
+				fmt.Println("error in clicking testimonial link:", err)
 			}
 
+			var url string
+			err2 := chromedp.Run(tabContext,
+				chromedp.AttributeValue(`div.group a`, "href", &url, nil),
+			)
+			if err2 != nil {
+				fmt.Println("error in getting testimonial url:", err2)
+			}
+			results = append(results, SeedCompanyResult{
+				CompanyName: name,
+				CompanyURL:  url,
+			})
+
+			fmt.Println("Clicked on company:", name, "URL:", url)
+
+			if i == 2 {
+				break
+			}
+
+			chromedp.Run(tabContext,
+				chromedp.Navigate(sc.URL),
+				chromedp.Sleep(sc.WaitTime),
+				chromedp.Nodes(sc.Selector, &nodes, chromedp.AtLeast(0)),
+			)
 		}
+
 		fmt.Println("results ", results)
 	}
 
@@ -184,5 +162,12 @@ func lastWord(text string) string {
 	if len(fields) == 0 {
 		return ""
 	}
+
+	for i, field := range fields {
+		if strings.ToLower(field) == "at" && i+1 < len(fields) {
+			return strings.Join(fields[i+1:], " ")
+		}
+	}
+
 	return fields[len(fields)-1]
 }

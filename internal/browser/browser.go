@@ -24,8 +24,9 @@ type Options struct {
 
 func CreateNewBrowser(options Options) *Browser {
 	execOptions := append(chromedp.DefaultExecAllocatorOptions[:],
-		chromedp.Flag("headless", options.Headless),
+		chromedp.Flag("headless", "new"),
 		chromedp.Flag("disable-gpu", options.Disbale_gpu),
+		chromedp.UserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"),
 		chromedp.Flag("disable-blink-features", "AutomationControlled"),
 		chromedp.WindowSize(options.WindowWidth, options.WindowHeight),
 	)
