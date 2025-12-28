@@ -10,7 +10,6 @@ import (
 	"context"
 	"log"
 
-	"github.com/chandhuDev/JobLoop/internal/config/search"
 	"github.com/chandhuDev/JobLoop/internal/config/vision"
 	"github.com/chandhuDev/JobLoop/internal/service"
 	"github.com/joho/godotenv"
@@ -22,6 +21,8 @@ func main() {
 		log.Println("No .env file found")
 	}
 
+   scChan := make(chan service.SeedCompanyResult)
+
 	browserOptions := browser.Options{
 		Disbale_gpu:  true,
 		WindowWidth:  1920,
@@ -31,12 +32,12 @@ func main() {
 	defer browser.Close()
 
 	SeedCompanyConfigs := []service.SeedCompanyConfig{
-		//   {
-		//    Name: "Y Combinator",
-		//    URL: "http://www.ycombinator.com/companies",
-		//    Selector: `span[class^="_coName_i9oky_470"]`,
-		//    WaitTime: 10 * time.Second,
-		//   },
+		  {
+		   Name: "Y Combinator",
+		   URL: "http://www.ycombinator.com/companies",
+		   Selector: `span[class^="_coName_i9oky_470"]`,
+		   WaitTime: 10 * time.Second,
+		  },
 		{
 			Name:     "Peer list",
 			URL:      "https://peerlist.io/jobs",
@@ -44,15 +45,15 @@ func main() {
 			WaitTime: 5 * time.Second,
 		},
 	}
-	customSearchInstance := search.CreateSearchService(context.Background())
 
-	seedCompanyResultArray := service.SeedCompanyConfigs(browser, SeedCompanyConfigs, customSearchInstance)
-	fmt.Println("Seed Company Results:", seedCompanyResultArray)
+	service.SeedCompanyConfigs(browser, SeedCompanyConfigs, scChan)
 
 	visionInstance, _ := vision.CreateVisionInit(context.Background())
 	defer visionInstance.Close()
 	vision := service.SetUpVision(visionInstance)
-	service.ScrapeTestimonial(browser, *vision, seedCompanyResultArray)
+	service.ScrapeTestimonial(browser, *vision, scChan)
+
+   close(scChan)
 
 	// db := database.ConnectDatabase()
 	// if err := database.CreateSchema(); err!= nil {
