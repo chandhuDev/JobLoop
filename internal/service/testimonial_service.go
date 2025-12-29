@@ -13,11 +13,11 @@ import (
 func ScrapeTestimonial(browser *browser.Browser, vision VisionConfig, scChan <-chan SeedCompanyResult) {
 	var testimonialWG sync.WaitGroup
 	var imageWG sync.WaitGroup
-	imageResultChan := make(chan []string)
+	imageResultChan := make(chan []string, 100)
 
 	for i := 0; i < 5; i++ {
 		testimonialWG.Add(1)
-		go func(i int, browser *browser.Browser, scChan <-chan SeedCompanyResult, wg *sync.WaitGroup, im chan []string) {
+		go func(i int, browser browser.Browser, scChan <-chan SeedCompanyResult, wg *sync.WaitGroup, im chan []string) {
 			fmt.Printf("Starting testimonial scraper goroutine %d\n", i)
 
 			defer testimonialWG.Done()

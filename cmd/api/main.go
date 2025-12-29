@@ -21,7 +21,7 @@ func main() {
 		log.Println("No .env file found")
 	}
 
-   scChan := make(chan service.SeedCompanyResult)
+   scChan := make(chan service.SeedCompanyResult, 50)
 
 	browserOptions := browser.Options{
 		Disbale_gpu:  true,
