@@ -6,11 +6,12 @@ import (
 	"sync"
 
 	"github.com/chandhuDev/JobLoop/internal/browser"
+	"github.com/chandhuDev/JobLoop/internal/Utils/error"
 	"github.com/chromedp/cdproto/cdp"
 	"github.com/chromedp/chromedp"
 )
 
-func ScrapeTestimonial(browser *browser.Browser, vision VisionConfig, scChan <-chan SeedCompanyResult) {
+func ScrapeTestimonial(browser *browser.Browser, vision VisionConfig, scChan <-chan SeedCompanyResult, e chan error.WorkerError) {
 	var testimonialWG sync.WaitGroup
 	var imageWG sync.WaitGroup
 	imageResultChan := make(chan []string, 100)

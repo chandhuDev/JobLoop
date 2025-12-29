@@ -4,11 +4,11 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/chandhuDev/JobLoop/internal/Utils/error"
 	"github.com/chandhuDev/JobLoop/internal/browser"
 
 	// "github.com/chandhuDev/JobLoop/internal/database"
 	"context"
-	"log"
 
 	"github.com/chandhuDev/JobLoop/internal/config/vision"
 	"github.com/chandhuDev/JobLoop/internal/service"
@@ -17,11 +17,19 @@ import (
 
 func main() {
 	fmt.Println("Starting JobLoop")
-	if err := godotenv.Load(); err != nil {
-		log.Println("No .env file found")
-	}
 
-   scChan := make(chan service.SeedCompanyResult, 50)
+	scChan := make(chan service.SeedCompanyResult, 50)
+	errChan := make(chan error.WorkerError, 30)
+
+   error.HandleError(errChan)
+
+	if err := godotenv.Load(); err != nil {
+		errChan <- error.WorkerError{
+			WorkerId: -1,
+			Message:  "error in loading env file",
+			Err:      err,
+		}
+	}
 
 	browserOptions := browser.Options{
 		Disbale_gpu:  true,
@@ -32,12 +40,12 @@ func main() {
 	defer browser.Close()
 
 	SeedCompanyConfigs := []service.SeedCompanyConfig{
-		  {
-		   Name: "Y Combinator",
-		   URL: "http://www.ycombinator.com/companies",
-		   Selector: `span[class^="_coName_i9oky_470"]`,
-		   WaitTime: 10 * time.Second,
-		  },
+		{
+			Name:     "Y Combinator",
+			URL:      "http://www.ycombinator.com/companies",
+			Selector: `span[class^="_coName_i9oky_470"]`,
+			WaitTime: 10 * time.Second,
+		},
 		{
 			Name:     "Peer list",
 			URL:      "https://peerlist.io/jobs",
@@ -46,14 +54,14 @@ func main() {
 		},
 	}
 
-	service.SeedCompanyConfigs(browser, SeedCompanyConfigs, scChan)
+	service.SeedCompanyConfigs(browser, SeedCompanyConfigs, scChan, errChan)
 
 	visionInstance, _ := vision.CreateVisionInit(context.Background())
 	defer visionInstance.Close()
 	vision := service.SetUpVision(visionInstance)
-	service.ScrapeTestimonial(browser, *vision, scChan)
+	service.ScrapeTestimonial(browser, *vision, scChan, errChan)
 
-   close(scChan)
+	close(scChan)
 
 	// db := database.ConnectDatabase()
 	// if err := database.CreateSchema(); err!= nil {

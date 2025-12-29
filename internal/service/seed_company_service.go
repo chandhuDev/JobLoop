@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/chandhuDev/JobLoop/internal/browser"
+	"github.com/chandhuDev/JobLoop/internal/Utils/error"
 	"github.com/chandhuDev/JobLoop/internal/config/search"
 	"github.com/chromedp/cdproto/cdp"
 	"github.com/chromedp/chromedp"
@@ -35,22 +36,22 @@ func NewSeedCompanyscaraper(companyConfig SeedCompanyConfig) *SeedCompanyConfig 
 	}
 }
 
-func SeedCompanyConfigs(b *browser.Browser, scc []SeedCompanyConfig, scChan chan SeedCompanyResult) {
+func SeedCompanyConfigs(b *browser.Browser, scc []SeedCompanyConfig, scChan chan SeedCompanyResult, errChan chan error.WorkerError) {
 	var wg sync.WaitGroup
 	for i := 0; i < len(scc); i++ {
 		if scc[i].Name == "Peer list" {
 			wg.Add(1)
 
-			go func(d SeedCompanyConfig, b *browser.Browser, scChan chan SeedCompanyResult, wg *sync.WaitGroup) {
-				d.getSeedCompaniesFromPeerList(b, scChan, wg)
-			}(scc[i], b, scChan, &wg)
+			go func(d SeedCompanyConfig, b *browser.Browser, scChan chan SeedCompanyResult, wg *sync.WaitGroup,	errChan chan error.WorkerError) {
+				d.getSeedCompaniesFromPeerList(b, scChan, wg, errChan)
+			}(scc[i], b, scChan, &wg, errChan)
 		} else {
 			wg.Add(1)
 
-			go func(d SeedCompanyConfig, b *browser.Browser, scChan chan SeedCompanyResult, wg *sync.WaitGroup) {
+			go func(d SeedCompanyConfig, b *browser.Browser, scChan chan SeedCompanyResult, wg *sync.WaitGroup, errChan chan error.WorkerError) {
 				tabContext, tabCancel := b.RunInNewTab()
-				d.getSeedCompaniesFromYCombinator(tabContext, tabCancel, scChan, wg)
-			}(scc[i], b, scChan, &wg)
+				d.getSeedCompaniesFromYCombinator(tabContext, tabCancel, scChan, wg, errChan)
+			}(scc[i], b, scChan, &wg, errChan)
 		}
 	}
 	go func() {
@@ -59,7 +60,7 @@ func SeedCompanyConfigs(b *browser.Browser, scc []SeedCompanyConfig, scChan chan
 	}()
 }
 
-func (sca *SeedCompanyConfig) getSeedCompaniesFromPeerList(b *browser.Browser, resultChannel chan SeedCompanyResult, wg *sync.WaitGroup) {
+func (sca *SeedCompanyConfig) getSeedCompaniesFromPeerList(b *browser.Browser, resultChannel chan SeedCompanyResult, wg *sync.WaitGroup, e chan error.WorkerError) {
 	tabContext, tabCancel := b.RunInNewTab()
 	defer tabCancel()
 	var nodes []*cdp.Node
@@ -82,6 +83,11 @@ func (sca *SeedCompanyConfig) getSeedCompaniesFromPeerList(b *browser.Browser, r
 			chromedp.Text(pXPath, &Url, chromedp.BySearch),
 		)
 		if err != nil {
+			e <- error.WorkerError{
+				WorkerId: i,
+				Message: "error in collecting nodes:" + Url,
+				Err : err,
+			}
 			continue
 		}
 		namesChan <- lastWord(Url)
@@ -94,9 +100,13 @@ func (sca *SeedCompanyConfig) getSeedCompaniesFromPeerList(b *browser.Browser, r
 			defer wg.Done()
 			fmt.Printf("Worker %d processing\n", i)
 			for name := range namesChan {
-				v, e := customSearchInstance.Cse.List().Q(name).Cx(serachEnginKey).Do()
+				v, err := customSearchInstance.Cse.List().Q(name).Cx(serachEnginKey).Do()
 				if e != nil {
-					fmt.Println("error in search:", e)
+					e <- error.WorkerError{
+						WorkerId: i,
+						Message: "error in searching company name:" + name,
+						Err : err,
+					}
 				}
 				fmt.Println("search results for ", name, ":", v.Items[0].Link)
 				resultChannel <- SeedCompanyResult{
@@ -110,7 +120,7 @@ func (sca *SeedCompanyConfig) getSeedCompaniesFromPeerList(b *browser.Browser, r
 	}
 }
 
-func (sca *SeedCompanyConfig) getSeedCompaniesFromYCombinator(tabContext context.Context, tabCancel context.CancelFunc, resultChan chan SeedCompanyResult, wg *sync.WaitGroup) {
+func (sca *SeedCompanyConfig) getSeedCompaniesFromYCombinator(tabContext context.Context, tabCancel context.CancelFunc, resultChan chan SeedCompanyResult, wg *sync.WaitGroup, e chan error.WorkerError) {
 	defer tabCancel()
 	var nodes []*cdp.Node
 
@@ -132,7 +142,11 @@ func (sca *SeedCompanyConfig) getSeedCompaniesFromYCombinator(tabContext context
 			chromedp.Click(nodes[i].FullXPath()),
 		)
 		if err != nil {
-			fmt.Println("error in clicking testimonial link:", err)
+			e <- error.WorkerError{
+				WorkerId: -1,
+				Message: "error in clicking testimonial link",
+				Err : err,
+			}
 		}
 
 		var url string
@@ -140,7 +154,11 @@ func (sca *SeedCompanyConfig) getSeedCompaniesFromYCombinator(tabContext context
 			chromedp.AttributeValue(`div.group a`, "href", &url, nil),
 		)
 		if err2 != nil {
-			fmt.Println("error in getting testimonial url:", err2)
+			e <- error.WorkerError{
+				WorkerId: -1,
+				Message: "error in getting testimonial url:",
+				Err : err2,
+			}
 		}
 		resultChan <- SeedCompanyResult{
 			CompanyName: name,
