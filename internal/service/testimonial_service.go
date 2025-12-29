@@ -10,65 +10,88 @@ import (
 	"github.com/chromedp/chromedp"
 )
 
-func ScrapeTestimonial(browser *browser.Browser, vision VisionConfig, seedCompanyList []SeedCompanyResult) {
-	var nodes []*cdp.Node
-	var wg sync.WaitGroup
-	xpath := `
-	(
-	  //*[contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'trust')]
-		/following::*[count(.//img) >= 3][1]
-	)//img
-	`
-	for i := 0; i < len(seedCompanyList); i++ {
-		tabContext, tabCancel := browser.RunInNewTab()
+func ScrapeTestimonial(browser *browser.Browser, vision VisionConfig, scChan <-chan SeedCompanyResult) {
+	var testimonialWG sync.WaitGroup
+	var imageWG sync.WaitGroup
+	imageResultChan := make(chan []string)
 
-		err := chromedp.Run(tabContext,
-			chromedp.Navigate(seedCompanyList[i].CompanyURL),
-			chromedp.WaitVisible("body"),
-			chromedp.Nodes(xpath, &nodes, chromedp.BySearch, chromedp.AtLeast(0)),
-		)
+	for i := 0; i < 5; i++ {
+		testimonialWG.Add(1)
+		go func(i int, browser *browser.Browser, scChan <-chan SeedCompanyResult, wg *sync.WaitGroup, im chan []string) {
+			fmt.Printf("Starting testimonial scraper goroutine %d\n", i)
 
-		if err != nil {
-			fmt.Println("Error navigating to testimonial page:", err)
-			tabCancel()
-		}
+			defer testimonialWG.Done()
+			tabContext, tabCancel := browser.RunInNewTab()
+			defer tabCancel()
+			xpath := `
+		  (
+			//*[contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'trust')]
+			  /following::*[count(.//img) >= 3][1]
+		  )//img
+		  `
 
-		if len(nodes) == 0 || nodes == nil {
-			fmt.Println("No testimonial images found for", seedCompanyList[i].CompanyName)
-			tabCancel()
-			continue
-		}
+			for scr := range scChan {
+				var nodes []*cdp.Node
 
-		var requestsArray []string
-		for j := 0; j < len(nodes); j++ {
-			var fullURL string
-			fullURL = getAttr(tabContext, nodes[j].FullXPath(), "src")
-			fmt.Println("Found testimonial image URL:", fullURL)
-			if fullURL == "" || fullURL == "null" {
-				fullURL = getAttr(tabContext, nodes[j].FullXPath(), "data-src")
+				err := chromedp.Run(tabContext,
+					chromedp.Navigate(scr.CompanyURL),
+					chromedp.WaitVisible("body"),
+					chromedp.Nodes(xpath, &nodes, chromedp.BySearch, chromedp.AtLeast(0)),
+				)
+				if err != nil {
+					fmt.Println("Error navigating to testimonial page:", err)
+				}
+				if len(nodes) == 0 || nodes == nil {
+					fmt.Println("No testimonial images found for", scr.CompanyName)
+					break
+				}
+				var UrlArray []string
+
+				for j := range nodes {
+					var fullURL string
+					fullURL = getAttr(tabContext, nodes[j].FullXPath(), "src")
+					if fullURL == "" || fullURL == "null" {
+						fullURL = getAttr(tabContext, nodes[j].FullXPath(), "data-src")
+					}
+					UrlArray = append(UrlArray, fullURL)
+				}
+				im <- UrlArray
+
 			}
-			requestsArray = append(requestsArray, fullURL)
-		}
+		}(i, browser, scChan, &testimonialWG, imageResultChan)
 
-		tabCancel()
-
-		wg.Add(1)
-		go func(urls []string) {
-			defer wg.Done()
-			vision.ExtractImageFromText(urls)
-		}(requestsArray)
 	}
-	wg.Wait()
+
+	for i := 0; i < 5; i++ {
+		imageWG.Add(1)
+		go func(i int, v VisionConfig) {
+			fmt.Printf("Starting image processor goroutine %d\n", i)
+			defer imageWG.Done()
+			for urlArray := range imageResultChan {
+				v.ExtractImageFromText(urlArray)
+
+			}
+		}(i, vision)
+	}
+
+	go func() {
+		testimonialWG.Wait()
+		close(imageResultChan)
+	}()
+	imageWG.Wait()
+
 }
 
 func getAttr(ctx context.Context, xpath string, attributeName string) string {
 	var url string
-	// chromedp.Run(ctx, chromedp.AttributeValue(xpath, attributeName, &url, nil, chromedp.BySearch))
-	// if url != "" {
-	// 	fmt.Println("Error getting attribute value from nodes", url)
-	// 	return url
-	// }
-	chromedp.Run(ctx, chromedp.JavascriptAttribute(xpath, attributeName, &url))
-     fmt.Println("Extracted attribute", attributeName, "with value:", url)
+	err := chromedp.Run(ctx, chromedp.JavascriptAttribute(xpath, attributeName, &url))
+	if err != nil {
+		fmt.Printf("Error getting JS attribute %s at %s: %v\n", attributeName, xpath, err)
+		return ""
+	}
+	if url != "" {
+		fmt.Printf("Extracted %s: %s\n", attributeName, url)
+	}
+	fmt.Println("Extracted attribute", attributeName, "with value:", url)
 	return url
 }
