@@ -1,7 +1,7 @@
 package repository
 
 import (
-	"fmt"
+	"log/slog"
 	"time"
 
 	models "github.com/chandhuDev/JobLoop/internal/models"
@@ -24,6 +24,6 @@ func CreateSeedCompany(seedCompany schema.SeedCompanies, DB *gorm.DB) error {
 	if result.Error != nil {
 		return result.Error
 	}
-	fmt.Printf("%d rows inserted to table", result.RowsAffected)
+	slog.Info("Seed company created successfully", slog.String("CompanyName", seedCompany.CompanyName))
 	return nil
 }

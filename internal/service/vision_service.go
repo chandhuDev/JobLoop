@@ -2,7 +2,7 @@ package service
 
 import (
 	"context"
-	"fmt"
+	"log/slog"
 
 	"github.com/chandhuDev/JobLoop/internal/interfaces"
 	models "github.com/chandhuDev/JobLoop/internal/models"
@@ -58,7 +58,7 @@ func (v *VisionWrapper) ExtractImageFromText(ImageUrlArrays []string, errHandler
 	}
 	var resultsArray []models.TestimonialResult
 	for _, response := range responseArray.Responses {
-		fmt.Println("Text Annotations:", response.TextAnnotations)
+		slog.Info("Text Annotations:", response.TextAnnotations)
 		resultsArray = append(resultsArray, models.TestimonialResult{
 			Name: response.TextAnnotations[0].Description,
 		})

@@ -1,7 +1,8 @@
 package main
 
 import (
-	"fmt"
+	"log/slog"
+	"os"
 	"time"
 
 	models "github.com/chandhuDev/JobLoop/internal/models"
@@ -13,10 +14,16 @@ import (
 )
 
 func main() {
-	fmt.Println("Starting JobLoop")
 
 	errConfig := service.SetUpErrorClient()
 	errInstance := &service.ErrorService{ErrorHandler: errConfig}
+
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
+		Level: slog.LevelInfo,
+	}))
+
+	slog.SetDefault(logger)
+
 	if err := godotenv.Load(); err != nil {
 		errInstance.Send(models.WorkerError{
 			WorkerId: -1,

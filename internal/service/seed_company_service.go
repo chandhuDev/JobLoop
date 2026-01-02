@@ -2,7 +2,7 @@ package service
 
 import (
 	"context"
-	"fmt"
+	"log/slog"
 	"os"
 	"strings"
 	"sync"
@@ -65,6 +65,7 @@ func (s *SeedCompanyService) GetSeedCompaniesFromPeerList(scraper *interfaces.Sc
 	serachEnginKey := os.Getenv("GOOGLE_SEARCH_ENGINE")
 	namesChan := make(chan string)
 
+	slog.Info("worker started for peerlist")
 	chromedp.Run(tabContext,
 		chromedp.Navigate(sp.URL),
 		chromedp.WaitReady("body"),
@@ -95,7 +96,7 @@ func (s *SeedCompanyService) GetSeedCompaniesFromPeerList(scraper *interfaces.Sc
 
 		go func(i int) {
 			defer s.SeedCompany.Wg.Done()
-			fmt.Printf("Worker %d processing\n", i)
+			slog.Info("Worker %d processing\n", i)
 			for name := range namesChan {
 				result, err := scraper.Search.SearchKeyWordInGoogle(name, i, serachEnginKey)
 				scraper.Err.Send(models.WorkerError{
@@ -103,7 +104,7 @@ func (s *SeedCompanyService) GetSeedCompaniesFromPeerList(scraper *interfaces.Sc
 					Message:  "error in collecting nodes:" + result,
 					Err:      err,
 				})
-				fmt.Println("search results for ", name, ":", result)
+				slog.Info("search results for ", name, ":", result)
 				s.SeedCompany.ResultChan <- models.SeedCompanyResult{
 					CompanyName: name,
 					CompanyURL:  result,
@@ -121,7 +122,7 @@ func (s *SeedCompanyService) GetSeedCompaniesFromYCombinator(context context.Con
 		chromedp.Sleep(yc.WaitTime),
 		chromedp.Nodes(yc.Selector, &s.SeedCompany.Nodes, chromedp.AtLeast(0)),
 	)
-	fmt.Printf("Found %d nodes with selector '%s' on %s\n", len(s.SeedCompany.Nodes), yc.Selector, yc.URL)
+	slog.Info("Found %d nodes with selector '%s' on %s\n", len(s.SeedCompany.Nodes), yc.Selector, yc.URL)
 
 	for i := range s.SeedCompany.Nodes {
 
@@ -156,8 +157,7 @@ func (s *SeedCompanyService) GetSeedCompaniesFromYCombinator(context context.Con
 			CompanyName: name,
 			CompanyURL:  url,
 		}
-
-		fmt.Println("Clicked on company:", name, "URL:", url)
+		slog.Info("seed company Ycombinator", slog.String("CompanyName", name), slog.String("CompanyURL", url))
 
 		chromedp.Run(context,
 			chromedp.Navigate(yc.URL),

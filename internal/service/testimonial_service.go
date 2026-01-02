@@ -2,7 +2,7 @@ package service
 
 import (
 	"context"
-	"fmt"
+	"log/slog"
 	"sync"
 
 	interfaces "github.com/chandhuDev/JobLoop/internal/interfaces"
@@ -28,7 +28,6 @@ func (t *TestimonialService) ScrapeTestimonial(scraper *interfaces.ScraperClient
 	for i := 0; i < 5; i++ {
 		t.Testimonial.TestimonialWg.Add(1)
 		go func(i int, browser interfaces.BrowserClient, scChan <-chan models.SeedCompanyResult, wg *sync.WaitGroup, im chan []string, e interfaces.ErrorClient) {
-			fmt.Printf("Starting testimonial scraper goroutine %d\n", i)
 
 			defer t.Testimonial.TestimonialWg.Done()
 			tabContext, tabCancel := scraper.Browser.RunInNewTab()
@@ -56,7 +55,7 @@ func (t *TestimonialService) ScrapeTestimonial(scraper *interfaces.ScraperClient
 					})
 				}
 				if len(nodes) == 0 || nodes == nil {
-					fmt.Println("No testimonial images found for", scr.CompanyName)
+					slog.Info("No testimonial images found for", scr.CompanyName)
 					break
 				}
 				var UrlArray []string
@@ -79,7 +78,7 @@ func (t *TestimonialService) ScrapeTestimonial(scraper *interfaces.ScraperClient
 	for i := 0; i < 5; i++ {
 		t.Testimonial.ImageWg.Add(1)
 		go func(i int, v VisionWrapper, e interfaces.ErrorClient) {
-			fmt.Printf("Starting image processor goroutine %d\n", i)
+			slog.Info("Starting image processor goroutine %d\n", i)
 			defer t.Testimonial.TestimonialWg.Done()
 			for urlArray := range t.Testimonial.ImageResultChan {
 				v.ExtractImageFromText(urlArray, e)
@@ -107,8 +106,7 @@ func getAttr(ctx context.Context, xpath string, attributeName string, e interfac
 		return ""
 	}
 	if url != "" {
-		fmt.Printf("Extracted %s: %s\n", attributeName, url)
+		slog.Info("Extracted attribute", slog.String("URL", url))
 	}
-	fmt.Println("Extracted attribute", attributeName, "with value:", url)
 	return url
 }

@@ -1,7 +1,7 @@
 package service
 
 import (
-	"fmt"
+	"log/slog"
 
 	models "github.com/chandhuDev/JobLoop/internal/models"
 )
@@ -17,7 +17,7 @@ func SetUpErrorClient() *models.ErrorHandler {
 }
 func (e *ErrorService) HandleError() {
 	for err := range e.ErrorHandler.ErrChan {
-		fmt.Printf("error from worker %d: message: %s\n", err.WorkerId, err.Message)
+		slog.Info("error from worker %d: message: %s\n", err.WorkerId, err.Message)
 	}
 }
 
