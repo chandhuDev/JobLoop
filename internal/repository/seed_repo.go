@@ -4,12 +4,12 @@ import (
 	"fmt"
 	"time"
 
+	models "github.com/chandhuDev/JobLoop/internal/models"
 	"github.com/chandhuDev/JobLoop/internal/schema"
-	"github.com/chandhuDev/JobLoop/internal/service"
 	"gorm.io/gorm"
 )
 
-func CreateSeedCompanyRepository(cd service.SeedCompanyResult, TestimonialArray []schema.TestimonialCompanies) schema.SeedCompanies {
+func CreateSeedCompanyRepository(cd models.SeedCompanyResult, TestimonialArray []schema.TestimonialCompanies) schema.SeedCompanies {
 	return schema.SeedCompanies{
 		CompanyName:          cd.CompanyName,
 		CompanyURL:           cd.CompanyURL,
@@ -24,6 +24,6 @@ func CreateSeedCompany(seedCompany schema.SeedCompanies, DB *gorm.DB) error {
 	if result.Error != nil {
 		return result.Error
 	}
-	fmt.Printf("%s rows inserted to table", result.RowsAffected)
+	fmt.Printf("%d rows inserted to table", result.RowsAffected)
 	return nil
 }

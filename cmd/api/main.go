@@ -4,42 +4,62 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/chandhuDev/JobLoop/internal/Utils/error"
-	"github.com/chandhuDev/JobLoop/internal/browser"
+	models "github.com/chandhuDev/JobLoop/internal/models"
 
-	// "github.com/chandhuDev/JobLoop/internal/database"
 	"context"
 
-	"github.com/chandhuDev/JobLoop/internal/config/vision"
-	"github.com/chandhuDev/JobLoop/internal/service"
+	service "github.com/chandhuDev/JobLoop/internal/service"
 	"github.com/joho/godotenv"
 )
 
 func main() {
 	fmt.Println("Starting JobLoop")
 
-	scChan := make(chan service.SeedCompanyResult, 50)
-	errChan := make(chan error.WorkerError, 30)
-
-   error.HandleError(errChan)
-
+	errConfig := service.SetUpErrorClient()
+	errInstance := &service.ErrorService{ErrorHandler: errConfig}
 	if err := godotenv.Load(); err != nil {
-		errChan <- error.WorkerError{
+		errInstance.Send(models.WorkerError{
 			WorkerId: -1,
 			Message:  "error in loading env file",
 			Err:      err,
-		}
+		})
 	}
 
-	browserOptions := browser.Options{
+	browserOptions := models.Options{
 		Disbale_gpu:  true,
 		WindowWidth:  1920,
 		WindowHeight: 1080,
 	}
-	browser := browser.CreateNewBrowser(browserOptions)
+	browserInstance, browserError := service.CreateNewBrowser(browserOptions)
+	errInstance.Send(models.WorkerError{
+		WorkerId: -1,
+		Message:  "error in creating browser instance",
+		Err:      browserError,
+	})
+	browser := &service.BrowserService{Browser: browserInstance}
 	defer browser.Close()
 
-	SeedCompanyConfigs := []service.SeedCompanyConfig{
+	searchInstance, searchInstanceError := service.CreateSearchService(context.Background())
+	errInstance.Send(models.WorkerError{
+		WorkerId: -1,
+		Message:  "error in creating google search instance",
+		Err:      searchInstanceError,
+	})
+	searchConfig := service.SetUpSearch(searchInstance)
+	search := &service.SearchService{Search: searchConfig}
+
+	visionInstance, visionInstanceError := service.CreateVisionInstance(context.Background())
+	errInstance.Send(models.WorkerError{
+		WorkerId: -1,
+		Message:  "error in creating google vision instance",
+		Err:      visionInstanceError,
+	})
+	visionConfig := service.SetUpVision(visionInstance)
+	visionWrapper := &service.VisionWrapper{Vision: visionConfig}
+
+	scraperClient := service.SetUpScraperClient(browser, visionInstance, search, errInstance)
+
+	SeedCompanyConfigs := []models.SeedCompany{
 		{
 			Name:     "Y Combinator",
 			URL:      "http://www.ycombinator.com/companies",
@@ -53,19 +73,14 @@ func main() {
 			WaitTime: 5 * time.Second,
 		},
 	}
+	seedCompanyFirst := service.NewSeedCompanyScraper(SeedCompanyConfigs[0])
+	seedCompanySecond := service.NewSeedCompanyScraper(SeedCompanyConfigs[1])
+	seedCompanyArrayInstance := service.NewSeedCompanyArray(*seedCompanyFirst, *seedCompanySecond)
+	seedCompany := service.SeedCompanyService{SeedCompany: seedCompanyArrayInstance}
 
-	service.SeedCompanyConfigs(browser, SeedCompanyConfigs, scChan, errChan)
+	seedCompany.SeedCompanyConfigs(scraperClient)
 
-	visionInstance, _ := vision.CreateVisionInit(context.Background())
-	defer visionInstance.Close()
-	vision := service.SetUpVision(visionInstance)
-	service.ScrapeTestimonial(browser, *vision, scChan, errChan)
-
-	close(scChan)
-
-	// db := database.ConnectDatabase()
-	// if err := database.CreateSchema(); err!= nil {
-	//    log.Fatalf("Failed to create schema: %v", err)
-	// }
-	// _ := database.SetUpDatabase(db)
+	testimonialconfig := service.NewTestimonial()
+	testimonial := service.TestimonialService{Testimonial: testimonialconfig}
+	testimonial.ScrapeTestimonial(scraperClient, seedCompany.SeedCompany.ResultChan, *visionWrapper)
 }

@@ -5,24 +5,33 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/chandhuDev/JobLoop/internal/browser"
-	"github.com/chandhuDev/JobLoop/internal/Utils/error"
+	interfaces "github.com/chandhuDev/JobLoop/internal/interfaces"
+	models "github.com/chandhuDev/JobLoop/internal/models"
 	"github.com/chromedp/cdproto/cdp"
 	"github.com/chromedp/chromedp"
 )
 
-func ScrapeTestimonial(browser *browser.Browser, vision VisionConfig, scChan <-chan SeedCompanyResult, e chan error.WorkerError) {
-	var testimonialWG sync.WaitGroup
-	var imageWG sync.WaitGroup
-	imageResultChan := make(chan []string, 100)
+type TestimonialService struct {
+	Testimonial *models.Testimonial
+}
+
+func NewTestimonial() *models.Testimonial {
+	return &models.Testimonial{
+		ImageResultChan: make(chan []string, 100),
+		TestimonialWg:   sync.WaitGroup{},
+		ImageWg:         sync.WaitGroup{},
+	}
+}
+
+func (t *TestimonialService) ScrapeTestimonial(scraper *interfaces.ScraperClient, scChan <-chan models.SeedCompanyResult, vision VisionWrapper) {
 
 	for i := 0; i < 5; i++ {
-		testimonialWG.Add(1)
-		go func(i int, browser browser.Browser, scChan <-chan SeedCompanyResult, wg *sync.WaitGroup, im chan []string) {
+		t.Testimonial.TestimonialWg.Add(1)
+		go func(i int, browser interfaces.BrowserClient, scChan <-chan models.SeedCompanyResult, wg *sync.WaitGroup, im chan []string, e interfaces.ErrorClient) {
 			fmt.Printf("Starting testimonial scraper goroutine %d\n", i)
 
-			defer testimonialWG.Done()
-			tabContext, tabCancel := browser.RunInNewTab()
+			defer t.Testimonial.TestimonialWg.Done()
+			tabContext, tabCancel := scraper.Browser.RunInNewTab()
 			defer tabCancel()
 			xpath := `
 		  (
@@ -40,7 +49,11 @@ func ScrapeTestimonial(browser *browser.Browser, vision VisionConfig, scChan <-c
 					chromedp.Nodes(xpath, &nodes, chromedp.BySearch, chromedp.AtLeast(0)),
 				)
 				if err != nil {
-					fmt.Println("Error navigating to testimonial page:", err)
+					e.Send(models.WorkerError{
+						WorkerId: i,
+						Message:  "Error navigating to testimonial page:",
+						Err:      err,
+					})
 				}
 				if len(nodes) == 0 || nodes == nil {
 					fmt.Println("No testimonial images found for", scr.CompanyName)
@@ -50,44 +63,47 @@ func ScrapeTestimonial(browser *browser.Browser, vision VisionConfig, scChan <-c
 
 				for j := range nodes {
 					var fullURL string
-					fullURL = getAttr(tabContext, nodes[j].FullXPath(), "src")
+					fullURL = getAttr(tabContext, nodes[j].FullXPath(), "src", e)
 					if fullURL == "" || fullURL == "null" {
-						fullURL = getAttr(tabContext, nodes[j].FullXPath(), "data-src")
+						fullURL = getAttr(tabContext, nodes[j].FullXPath(), "data-src", e)
 					}
 					UrlArray = append(UrlArray, fullURL)
 				}
 				im <- UrlArray
 
 			}
-		}(i, browser, scChan, &testimonialWG, imageResultChan)
+		}(i, scraper.Browser, scChan, &t.Testimonial.TestimonialWg, t.Testimonial.ImageResultChan, scraper.Err)
 
 	}
 
 	for i := 0; i < 5; i++ {
-		imageWG.Add(1)
-		go func(i int, v VisionConfig) {
+		t.Testimonial.ImageWg.Add(1)
+		go func(i int, v VisionWrapper, e interfaces.ErrorClient) {
 			fmt.Printf("Starting image processor goroutine %d\n", i)
-			defer imageWG.Done()
-			for urlArray := range imageResultChan {
-				v.ExtractImageFromText(urlArray)
-
+			defer t.Testimonial.TestimonialWg.Done()
+			for urlArray := range t.Testimonial.ImageResultChan {
+				v.ExtractImageFromText(urlArray, e)
 			}
-		}(i, vision)
+		}(i, vision, scraper.Err)
 	}
 
 	go func() {
-		testimonialWG.Wait()
-		close(imageResultChan)
+		t.Testimonial.TestimonialWg.Wait()
+		close(t.Testimonial.ImageResultChan)
 	}()
-	imageWG.Wait()
+	t.Testimonial.ImageWg.Wait()
 
 }
 
-func getAttr(ctx context.Context, xpath string, attributeName string) string {
+func getAttr(ctx context.Context, xpath string, attributeName string, e interfaces.ErrorClient) string {
 	var url string
 	err := chromedp.Run(ctx, chromedp.JavascriptAttribute(xpath, attributeName, &url))
 	if err != nil {
-		fmt.Printf("Error getting JS attribute %s at %s: %v\n", attributeName, xpath, err)
+		e.Send(models.WorkerError{
+			WorkerId: -1,
+			Message:  "Error getting JS attribute " + attributeName + " at " + xpath,
+			Err:      err,
+		})
 		return ""
 	}
 	if url != "" {
