@@ -80,11 +80,11 @@ func (s *SeedCompanyService) GetSeedCompaniesFromPeerList(scraper *interfaces.Sc
 			chromedp.Text(pXPath, &Url, chromedp.BySearch),
 		)
 		if err != nil {
-			s.SeedCompany.Err.ErrChan <- models.WorkerError{
+			scraper.Err.Send(models.WorkerError{
 				WorkerId: i,
 				Message:  "error in collecting nodes:" + Url,
 				Err:      err,
-			}
+			})
 			continue
 		}
 		namesChan <- lastWord(Url)
@@ -102,7 +102,7 @@ func (s *SeedCompanyService) GetSeedCompaniesFromPeerList(scraper *interfaces.Sc
 					WorkerId: i,
 					Message:  "error in collecting nodes:" + result,
 					Err:      err,
-				}) 
+				})
 				fmt.Println("search results for ", name, ":", result)
 				s.SeedCompany.ResultChan <- models.SeedCompanyResult{
 					CompanyName: name,
@@ -134,11 +134,11 @@ func (s *SeedCompanyService) GetSeedCompaniesFromYCombinator(context context.Con
 			chromedp.Click(s.SeedCompany.Nodes[i].FullXPath()),
 		)
 		if err != nil {
-			s.SeedCompany.Err.ErrChan <- models.WorkerError{
+			scraper.Err.Send(models.WorkerError{
 				WorkerId: -1,
 				Message:  "error in clicking testimonial link",
 				Err:      err,
-			}
+			})
 		}
 
 		var url string
@@ -146,11 +146,11 @@ func (s *SeedCompanyService) GetSeedCompaniesFromYCombinator(context context.Con
 			chromedp.AttributeValue(`div.group a`, "href", &url, nil),
 		)
 		if err2 != nil {
-			s.SeedCompany.Err.ErrChan <- models.WorkerError{
+			scraper.Err.Send(models.WorkerError{
 				WorkerId: -1,
 				Message:  "error in getting testimonial url:",
 				Err:      err2,
-			}
+			})
 		}
 		s.SeedCompany.ResultChan <- models.SeedCompanyResult{
 			CompanyName: name,
