@@ -30,81 +30,103 @@ func NewSeedCompanyScraper(companyConfig models.SeedCompany) *models.SeedCompany
 func NewSeedCompanyArray(firstSeedCompany models.SeedCompany, secondSeedCompany models.SeedCompany) *models.SeedCompanyArray {
 	return &models.SeedCompanyArray{
 		Companies:  []models.SeedCompany{firstSeedCompany, secondSeedCompany},
-		Wg:         &sync.WaitGroup{},
+		PWg:        &sync.WaitGroup{},
+		YCWg:       &sync.WaitGroup{},
 		ResultChan: make(chan models.SeedCompanyResult, 100),
-		Nodes:      make([]*cdp.Node, 0),
+		YCNodes:    make([]*cdp.Node, 0),
+		PNodes:     make([]*cdp.Node, 0),
 	}
 }
 
 func (s *SeedCompanyService) SeedCompanyConfigs(scraper *interfaces.ScraperClient) {
+	slog.Info("seed company scraper started ")
+
 	for i := 0; i < len(s.SeedCompany.Companies); i++ {
+
 		if s.SeedCompany.Companies[i].Name == "Peer list" {
-			s.SeedCompany.Wg.Add(1)
+			s.SeedCompany.PWg.Add(1)
 
 			go func(sp models.SeedCompany) {
+				defer s.SeedCompany.PWg.Done()
+
 				s.GetSeedCompaniesFromPeerList(scraper, &sp)
 			}(s.SeedCompany.Companies[i])
 		} else {
-			s.SeedCompany.Wg.Add(1)
+			s.SeedCompany.YCWg.Add(1)
 
 			go func(yc models.SeedCompany) {
+				defer s.SeedCompany.YCWg.Done()
 				tabContext, tabCancel := scraper.Browser.RunInNewTab()
 				s.GetSeedCompaniesFromYCombinator(tabContext, tabCancel, scraper, &yc)
 			}(s.SeedCompany.Companies[i])
 		}
 	}
 	go func() {
-		defer s.SeedCompany.Wg.Done()
+		s.SeedCompany.PWg.Wait()
+		s.SeedCompany.YCWg.Wait()
 		close(s.SeedCompany.ResultChan)
+		slog.Info("closing seedcompany waitgroups and result channel")
 	}()
 }
 
 func (s *SeedCompanyService) GetSeedCompaniesFromPeerList(scraper *interfaces.ScraperClient, sp *models.SeedCompany) {
+	slog.Info("worker started for peerlist")
+
 	tabContext, tabCancel := scraper.Browser.RunInNewTab()
 	defer tabCancel()
-	serachEnginKey := os.Getenv("GOOGLE_SEARCH_ENGINE")
-	namesChan := make(chan string)
 
-	slog.Info("worker started for peerlist")
-	chromedp.Run(tabContext,
+	searchEngineKey := os.Getenv("GOOGLE_SEARCH_ENGINE")
+	namesChan := make(chan string, 50)
+
+	// --- Fetch nodes ---
+	err := chromedp.Run(tabContext,
 		chromedp.Navigate(sp.URL),
 		chromedp.WaitReady("body"),
 		chromedp.Sleep(2*time.Second),
-		chromedp.Nodes(sp.Selector, &s.SeedCompany.Nodes, chromedp.AtLeast(0)),
+		chromedp.Nodes(sp.Selector, &s.SeedCompany.PNodes, chromedp.AtLeast(0)),
 	)
-	for i := 0; i < len(s.SeedCompany.Nodes); i++ {
-		var Url string
-		pXPath := s.SeedCompany.Nodes[i].FullXPath() + "/div[2]//p"
-
-		err := chromedp.Run(tabContext,
-			chromedp.WaitReady(pXPath, chromedp.BySearch),
-			chromedp.Text(pXPath, &Url, chromedp.BySearch),
-		)
-		if err != nil {
-			scraper.Err.Send(models.WorkerError{
-				WorkerId: i,
-				Message:  "error in collecting nodes:" + Url,
-				Err:      err,
-			})
-			continue
-		}
-		namesChan <- lastWord(Url)
+	if err != nil {
+		scraper.Err.Send(models.WorkerError{
+			WorkerId: -1,
+			Message:  "error fetching peerlist nodes",
+			Err:      err,
+		})
+		return
 	}
 
-	for i := 0; i < 3; i++ {
-		s.SeedCompany.Wg.Add(1)
+	slog.Info("Found nodes with selector",
+		slog.Int("length", len(s.SeedCompany.PNodes)),
+		slog.String("selector", sp.Selector),
+	)
 
-		go func(i int) {
-			defer s.SeedCompany.Wg.Done()
-			slog.Info("Worker %d processing\n", i)
+	// --- Search workers ---
+	var searchWg sync.WaitGroup
+	workerCount := 3
+
+	for i := 0; i < workerCount; i++ {
+		searchWg.Add(1)
+		 slog.Info("Worker goroutine for peerlist", slog.Int("id", i))
+
+		go func(workerID int) {
+			defer searchWg.Done()
+
 			for name := range namesChan {
-				result, err := scraper.Search.SearchKeyWordInGoogle(name, i, serachEnginKey)
-				scraper.Err.Send(models.WorkerError{
-					WorkerId: i,
-					Message:  "error in collecting nodes:" + result,
-					Err:      err,
-				})
-				slog.Info("search results for ", name, ":", result)
+				result, err := scraper.Search.SearchKeyWordInGoogle(
+					name, workerID, searchEngineKey,
+				)
+				if err != nil {
+					scraper.Err.Send(models.WorkerError{
+						WorkerId: workerID,
+						Message:  "error searching google",
+						Err:      err,
+					})
+					continue
+				}
+
+				slog.Info("search results",
+					slog.String("url", result),
+				)
+
 				s.SeedCompany.ResultChan <- models.SeedCompanyResult{
 					CompanyName: name,
 					CompanyURL:  result,
@@ -112,27 +134,53 @@ func (s *SeedCompanyService) GetSeedCompaniesFromPeerList(scraper *interfaces.Sc
 			}
 		}(i)
 	}
+
+	// --- Producer ---
+	go func() {
+		defer close(namesChan)
+
+		for _, node := range s.SeedCompany.PNodes {
+			var urlText string
+			pXPath := node.FullXPath() + "/div[2]//p"
+
+			err := chromedp.Run(tabContext,
+				chromedp.WaitReady(pXPath, chromedp.BySearch),
+				chromedp.Text(pXPath, &urlText, chromedp.BySearch),
+			)
+			if err != nil {
+				continue
+			}
+
+			name := lastWord(urlText)
+			// slog.Info("Uri in peerNodes", slog.String("uri", name))
+			namesChan <- name
+		}
+	}()
+
+	// --- Wait for workers ---
+	searchWg.Wait()
 }
 
 func (s *SeedCompanyService) GetSeedCompaniesFromYCombinator(context context.Context, cancel context.CancelFunc, scraper *interfaces.ScraperClient, yc *models.SeedCompany) {
+	slog.Info("worker started for ycombinator")
 	defer cancel()
 
 	chromedp.Run(context,
 		chromedp.Navigate(yc.URL),
 		chromedp.Sleep(yc.WaitTime),
-		chromedp.Nodes(yc.Selector, &s.SeedCompany.Nodes, chromedp.AtLeast(0)),
+		chromedp.Nodes(yc.Selector, &s.SeedCompany.YCNodes, chromedp.AtLeast(0)),
 	)
-	slog.Info("Found %d nodes with selector '%s' on %s\n", len(s.SeedCompany.Nodes), yc.Selector, yc.URL)
+	 slog.Info("Found nodes with selector", slog.Int("length of nodes", len(s.SeedCompany.YCNodes)), slog.String("for slector", yc.Selector), slog.String("for url", yc.URL))
 
-	for i := range s.SeedCompany.Nodes {
+	for i := range s.SeedCompany.YCNodes {
 
 		var name string
 
 		chromedp.Run(context,
-			chromedp.Text(s.SeedCompany.Nodes[i].FullXPath(), &name, chromedp.NodeVisible),
+			chromedp.Text(s.SeedCompany.YCNodes[i].FullXPath(), &name, chromedp.NodeVisible),
 		)
 		_, err := chromedp.RunResponse(context,
-			chromedp.Click(s.SeedCompany.Nodes[i].FullXPath()),
+			chromedp.Click(s.SeedCompany.YCNodes[i].FullXPath()),
 		)
 		if err != nil {
 			scraper.Err.Send(models.WorkerError{
@@ -157,12 +205,12 @@ func (s *SeedCompanyService) GetSeedCompaniesFromYCombinator(context context.Con
 			CompanyName: name,
 			CompanyURL:  url,
 		}
-		slog.Info("seed company Ycombinator", slog.String("CompanyName", name), slog.String("CompanyURL", url))
+		 slog.Info("seed company Ycombinator", slog.String("CompanyName", name), slog.String("CompanyURL", url))
 
 		chromedp.Run(context,
 			chromedp.Navigate(yc.URL),
 			chromedp.Sleep(yc.WaitTime),
-			chromedp.Nodes(yc.Selector, &s.SeedCompany.Nodes, chromedp.AtLeast(0)),
+			chromedp.Nodes(yc.Selector, &s.SeedCompany.YCNodes, chromedp.AtLeast(0)),
 		)
 	}
 

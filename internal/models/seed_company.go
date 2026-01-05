@@ -22,8 +22,10 @@ type SeedCompanyResult struct {
 
 type SeedCompanyArray struct {
 	Companies  []SeedCompany
-	Wg         *sync.WaitGroup
+	PWg         *sync.WaitGroup
+	YCWg         *sync.WaitGroup
 	ResultChan chan SeedCompanyResult
-	Nodes      []*cdp.Node
+	YCNodes    []*cdp.Node
+	PNodes     []*cdp.Node
 	Err        ErrorHandler
 }

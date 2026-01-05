@@ -71,13 +71,13 @@ func main() {
 			Name:     "Y Combinator",
 			URL:      "http://www.ycombinator.com/companies",
 			Selector: `span[class^="_coName_i9oky_470"]`,
-			WaitTime: 10 * time.Second,
+			WaitTime: 3 * time.Second,
 		},
 		{
 			Name:     "Peer list",
 			URL:      "https://peerlist.io/jobs",
 			Selector: `a[href^="/company/"][href*="/careers/"]`,
-			WaitTime: 5 * time.Second,
+			WaitTime: 2 * time.Second,
 		},
 	}
 	seedCompanyFirst := service.NewSeedCompanyScraper(SeedCompanyConfigs[0])

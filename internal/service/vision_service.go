@@ -58,9 +58,10 @@ func (v *VisionWrapper) ExtractImageFromText(ImageUrlArrays []string, errHandler
 	}
 	var resultsArray []models.TestimonialResult
 	for _, response := range responseArray.Responses {
-		slog.Info("Text Annotations:", response.TextAnnotations)
+		slog.Info("Text Annotations:",response.TextAnnotations)
 		resultsArray = append(resultsArray, models.TestimonialResult{
 			Name: response.TextAnnotations[0].Description,
+			Uri: response.Context.Uri,
 		})
 	}
 	return resultsArray

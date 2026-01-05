@@ -13,7 +13,7 @@ type BrowserService struct {
 
 func CreateNewBrowser(options models.Options) (*models.Browser, error) {
 	execOptions := append(chromedp.DefaultExecAllocatorOptions[:],
-		chromedp.Flag("headless", "new"),
+		chromedp.Flag("headless", "false"),
 		chromedp.Flag("disable-gpu", options.Disbale_gpu),
 		chromedp.UserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"),
 		chromedp.Flag("disable-blink-features", "AutomationControlled"),

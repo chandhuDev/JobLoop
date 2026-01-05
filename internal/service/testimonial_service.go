@@ -7,7 +7,6 @@ import (
 
 	interfaces "github.com/chandhuDev/JobLoop/internal/interfaces"
 	models "github.com/chandhuDev/JobLoop/internal/models"
-	"github.com/chromedp/cdproto/cdp"
 	"github.com/chromedp/chromedp"
 )
 
@@ -18,8 +17,8 @@ type TestimonialService struct {
 func NewTestimonial() *models.Testimonial {
 	return &models.Testimonial{
 		ImageResultChan: make(chan []string, 100),
-		TestimonialWg:   sync.WaitGroup{},
-		ImageWg:         sync.WaitGroup{},
+		TestimonialWg:   &sync.WaitGroup{},
+		ImageWg:         &sync.WaitGroup{},
 	}
 }
 
@@ -27,25 +26,26 @@ func (t *TestimonialService) ScrapeTestimonial(scraper *interfaces.ScraperClient
 
 	for i := 0; i < 5; i++ {
 		t.Testimonial.TestimonialWg.Add(1)
+
 		go func(i int, browser interfaces.BrowserClient, scChan <-chan models.SeedCompanyResult, wg *sync.WaitGroup, im chan []string, e interfaces.ErrorClient) {
 
-			defer t.Testimonial.TestimonialWg.Done()
 			tabContext, tabCancel := scraper.Browser.RunInNewTab()
 			defer tabCancel()
+			defer t.Testimonial.TestimonialWg.Done()
 			xpath := `
 		  (
 			//*[contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'trust')]
 			  /following::*[count(.//img) >= 3][1]
 		  )//img
 		  `
+			slog.Info("Starting Testimonial processor goroutine", slog.Int("goroutine id", i))
 
 			for scr := range scChan {
-				var nodes []*cdp.Node
 
 				err := chromedp.Run(tabContext,
 					chromedp.Navigate(scr.CompanyURL),
 					chromedp.WaitVisible("body"),
-					chromedp.Nodes(xpath, &nodes, chromedp.BySearch, chromedp.AtLeast(0)),
+					chromedp.Nodes(xpath, &t.Testimonial.TNodes, chromedp.BySearch, chromedp.AtLeast(0)),
 				)
 				if err != nil {
 					e.Send(models.WorkerError{
@@ -54,42 +54,60 @@ func (t *TestimonialService) ScrapeTestimonial(scraper *interfaces.ScraperClient
 						Err:      err,
 					})
 				}
-				if len(nodes) == 0 || nodes == nil {
-					slog.Info("No testimonial images found for", scr.CompanyName)
-					break
+				if len(t.Testimonial.TNodes) == 0 || t.Testimonial.TNodes == nil {
+					slog.Info("No testimonial images found for", slog.String("company Name", scr.CompanyName))
+					continue
 				}
 				var UrlArray []string
 
-				for j := range nodes {
+				for j := range t.Testimonial.TNodes {
 					var fullURL string
-					fullURL = getAttr(tabContext, nodes[j].FullXPath(), "src", e)
+					fullURL = getAttr(tabContext, t.Testimonial.TNodes[j].FullXPath(), "src", e)
 					if fullURL == "" || fullURL == "null" {
-						fullURL = getAttr(tabContext, nodes[j].FullXPath(), "data-src", e)
+						fullURL = getAttr(tabContext, t.Testimonial.TNodes[j].FullXPath(), "data-src", e)
 					}
 					UrlArray = append(UrlArray, fullURL)
 				}
 				im <- UrlArray
+				slog.Info("successfully appended")
+				slog.Info("successfully appended")
+				slog.Info("successfully appended")
+				slog.Info("successfully appended")
+				slog.Info("successfully appended")
+				slog.Info("successfully appended")
+				slog.Info("successfully appended")
+				slog.Info("successfully appended")
 
 			}
-		}(i, scraper.Browser, scChan, &t.Testimonial.TestimonialWg, t.Testimonial.ImageResultChan, scraper.Err)
 
+		}(i, scraper.Browser, scChan, t.Testimonial.TestimonialWg, t.Testimonial.ImageResultChan, scraper.Err)
 	}
+
+	// dd := make(chan []models.TestimonialResult, 50)
 
 	for i := 0; i < 5; i++ {
 		t.Testimonial.ImageWg.Add(1)
-		go func(i int, v VisionWrapper, e interfaces.ErrorClient) {
-			slog.Info("Starting image processor goroutine %d\n", i)
-			defer t.Testimonial.TestimonialWg.Done()
+
+		go func(workerID int) {
+			defer t.Testimonial.ImageWg.Done()
+
+			slog.Info("Started image processor goroutine",
+				slog.Int("goroutine_id", workerID),
+			)
+
 			for urlArray := range t.Testimonial.ImageResultChan {
-				v.ExtractImageFromText(urlArray, e)
+				slog.Info("In processed Images of testimonials")
+				result := vision.ExtractImageFromText(urlArray, scraper.Err)
+
+				slog.Info("Processed testimonial images",
+					slog.Any("result", result),
+				)
 			}
-		}(i, vision, scraper.Err)
+		}(i)
 	}
 
-	go func() {
-		t.Testimonial.TestimonialWg.Wait()
-		close(t.Testimonial.ImageResultChan)
-	}()
+	t.Testimonial.TestimonialWg.Wait()
+	close(t.Testimonial.ImageResultChan)
 	t.Testimonial.ImageWg.Wait()
 
 }
