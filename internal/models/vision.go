@@ -2,9 +2,10 @@ package models
 
 import (
 	vision "cloud.google.com/go/vision/apiv1"
+	"context"
 )
 
 type Vision struct {
 	VisionClient *vision.ImageAnnotatorClient
-	Err          ErrorHandler
+    VisionContext context.Context
 }

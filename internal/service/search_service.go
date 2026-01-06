@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"log/slog"
 	"os"
 
 	models "github.com/chandhuDev/JobLoop/internal/models"
@@ -28,7 +29,10 @@ func CreateSearchService(context context.Context) (*customsearch.Service, error)
 }
 
 func (s *SearchService) SearchKeyWordInGoogle(name string, i int, key string) (string, error) {
+	slog.Info("search scraper url anme", slog.String("url name", name), slog.Int("from worker id", i))
 	v, err := s.Search.SearchClient.Cse.List().Q(name).Cx(key).Do()
-
+	slog.Info("search results",
+		slog.String("url", v.Items[0].Link),
+	)
 	return v.Items[0].Link, err
 }

@@ -15,9 +15,10 @@ type VisionWrapper struct {
 	Vision *models.Vision
 }
 
-func SetUpVision(vision *vision.ImageAnnotatorClient) *models.Vision {
+func SetUpVision(vision *vision.ImageAnnotatorClient, context context.Context) *models.Vision {
 	return &models.Vision{
 		VisionClient: vision,
+		VisionContext: context,
 	}
 }
 
@@ -26,9 +27,12 @@ func CreateVisionInstance(context context.Context) (*vision.ImageAnnotatorClient
 	return v, err
 }
 
-func (v *VisionWrapper) ExtractImageFromText(ImageUrlArrays []string, errHandler interfaces.ErrorClient) []models.TestimonialResult {
+func (v *VisionWrapper) ExtractImageFromText(ImageUrlArrays []string, errHandler interfaces.ErrorClient, w int) []models.TestimonialResult {
+	slog.Info("we are starting vision scraper")
 	var requests []*visionpb.AnnotateImageRequest
 	for _, imageURL := range ImageUrlArrays {
+		slog.Info("vision imageurl to scrape", slog.String("imageUrl", imageURL), slog.Int("of workerId", w))
+
 		image := &visionpb.Image{
 			Source: &visionpb.ImageSource{
 				ImageUri: imageURL,
@@ -42,12 +46,17 @@ func (v *VisionWrapper) ExtractImageFromText(ImageUrlArrays []string, errHandler
 			Features: []*visionpb.Feature{feature},
 		}
 		requests = append(requests, req)
+		slog.Info("vision requesturl")
+
 	}
 
 	batchRequest := &visionpb.BatchAnnotateImagesRequest{
 		Requests: requests,
 	}
-	responseArray, err := v.Vision.VisionClient.BatchAnnotateImages(context.Background(), batchRequest)
+	slog.Info("before batchrequest")
+
+	responseArray, err := v.Vision.VisionClient.BatchAnnotateImages(v.Vision.VisionContext, batchRequest)
+	slog.Info("after batchrequest")
 
 	if err != nil {
 		errHandler.Send(models.WorkerError{
@@ -58,10 +67,12 @@ func (v *VisionWrapper) ExtractImageFromText(ImageUrlArrays []string, errHandler
 	}
 	var resultsArray []models.TestimonialResult
 	for _, response := range responseArray.Responses {
-		slog.Info("Text Annotations:",response.TextAnnotations)
+		slog.Info("after batchrequest")
+
+		slog.Info("Text Annotations: for imageurl response", response.TextAnnotations)
 		resultsArray = append(resultsArray, models.TestimonialResult{
 			Name: response.TextAnnotations[0].Description,
-			Uri: response.Context.Uri,
+			Uri:  response.Context.Uri,
 		})
 	}
 	return resultsArray

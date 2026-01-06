@@ -5,15 +5,23 @@ import (
 	"os"
 	"time"
 
-	models "github.com/chandhuDev/JobLoop/internal/models"
-
 	"context"
+	"os/signal"
+	"syscall"
+
+	models "github.com/chandhuDev/JobLoop/internal/models"
+	"golang.org/x/sync/errgroup"
 
 	service "github.com/chandhuDev/JobLoop/internal/service"
 	"github.com/joho/godotenv"
 )
 
 func main() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
 	errConfig := service.SetUpErrorClient()
 	errInstance := &service.ErrorService{ErrorHandler: errConfig}
@@ -37,16 +45,24 @@ func main() {
 		WindowWidth:  1920,
 		WindowHeight: 1080,
 	}
-	browserInstance, browserError := service.CreateNewBrowser(browserOptions)
+	browserInstance, browserError := service.CreateNewBrowser(browserOptions, ctx)
 	errInstance.Send(models.WorkerError{
 		WorkerId: -1,
 		Message:  "error in creating browser instance",
 		Err:      browserError,
 	})
 	browser := &service.BrowserService{Browser: browserInstance}
-	defer browser.Close()
 
-	searchInstance, searchInstanceError := service.CreateSearchService(context.Background())
+	defer func() {
+		if r := recover(); r != nil {
+			slog.Info("Panic recovered: %v", r)
+		}
+		slog.Info("Cleaning up...")
+		browser.Close()
+		slog.Info("Cleanup complete")
+	}()
+
+	searchInstance, searchInstanceError := service.CreateSearchService(ctx)
 	errInstance.Send(models.WorkerError{
 		WorkerId: -1,
 		Message:  "error in creating google search instance",
@@ -55,13 +71,13 @@ func main() {
 	searchConfig := service.SetUpSearch(searchInstance)
 	search := &service.SearchService{Search: searchConfig}
 
-	visionInstance, visionInstanceError := service.CreateVisionInstance(context.Background())
+	visionInstance, visionInstanceError := service.CreateVisionInstance(ctx)
 	errInstance.Send(models.WorkerError{
 		WorkerId: -1,
 		Message:  "error in creating google vision instance",
 		Err:      visionInstanceError,
 	})
-	visionConfig := service.SetUpVision(visionInstance)
+	visionConfig := service.SetUpVision(visionInstance, ctx)
 	visionWrapper := &service.VisionWrapper{Vision: visionConfig}
 
 	scraperClient := service.SetUpScraperClient(browser, visionInstance, search, errInstance)
@@ -82,12 +98,40 @@ func main() {
 	}
 	seedCompanyFirst := service.NewSeedCompanyScraper(SeedCompanyConfigs[0])
 	seedCompanySecond := service.NewSeedCompanyScraper(SeedCompanyConfigs[1])
+
 	seedCompanyArrayInstance := service.NewSeedCompanyArray(*seedCompanyFirst, *seedCompanySecond)
 	seedCompany := service.SeedCompanyService{SeedCompany: seedCompanyArrayInstance}
 
-	seedCompany.SeedCompanyConfigs(scraperClient)
-
 	testimonialconfig := service.NewTestimonial()
 	testimonial := service.TestimonialService{Testimonial: testimonialconfig}
-	testimonial.ScrapeTestimonial(scraperClient, seedCompany.SeedCompany.ResultChan, *visionWrapper)
+
+	g, gCtx := errgroup.WithContext(ctx)
+
+	g.Go(func() error {
+		select {
+		case sig := <-sigChan:
+			slog.Info("Signal received", "signal", sig)
+			cancel()
+			return nil
+		case <-gCtx.Done():
+			return nil
+		}
+	})
+
+	g.Go(func() error {
+		seedCompany.SeedCompanyConfigs(gCtx, scraperClient)
+		return nil
+	})
+
+	g.Go(func() error {
+		testimonial.ScrapeTestimonial(scraperClient, seedCompany.SeedCompany.ResultChan, *visionWrapper, gCtx)
+		return nil
+	})
+
+	if err := g.Wait(); err != nil {
+		slog.Error("Error", "error", err)
+	}
+
+	slog.Info("All work completed")
+
 }

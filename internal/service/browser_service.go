@@ -11,7 +11,7 @@ type BrowserService struct {
 	Browser *models.Browser
 }
 
-func CreateNewBrowser(options models.Options) (*models.Browser, error) {
+func CreateNewBrowser(options models.Options, ctx context.Context) (*models.Browser, error) {
 	execOptions := append(chromedp.DefaultExecAllocatorOptions[:],
 		chromedp.Flag("headless", "false"),
 		chromedp.Flag("disable-gpu", options.Disbale_gpu),
@@ -19,7 +19,7 @@ func CreateNewBrowser(options models.Options) (*models.Browser, error) {
 		chromedp.Flag("disable-blink-features", "AutomationControlled"),
 		chromedp.WindowSize(options.WindowWidth, options.WindowHeight),
 	)
-	allocContext, allocCancel := chromedp.NewExecAllocator(context.Background(), execOptions...)
+	allocContext, allocCancel := chromedp.NewExecAllocator(ctx, execOptions...)
 	browserContext, browserCancel := chromedp.NewContext(allocContext)
 
 	err := chromedp.Run(browserContext)

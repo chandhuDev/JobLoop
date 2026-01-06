@@ -22,13 +22,17 @@ func NewTestimonial() *models.Testimonial {
 	}
 }
 
-func (t *TestimonialService) ScrapeTestimonial(scraper *interfaces.ScraperClient, scChan <-chan models.SeedCompanyResult, vision VisionWrapper) {
+func (t *TestimonialService) ScrapeTestimonial(scraper *interfaces.ScraperClient, scChan <-chan models.SeedCompanyResult, vision VisionWrapper, ctx context.Context) {
 
-	for i := 0; i < 5; i++ {
+	select {
+	case <-ctx.Done():
+		return
+	default:
+	}
+	for i := 0; i < 3; i++ {
 		t.Testimonial.TestimonialWg.Add(1)
 
 		go func(i int, browser interfaces.BrowserClient, scChan <-chan models.SeedCompanyResult, wg *sync.WaitGroup, im chan []string, e interfaces.ErrorClient) {
-
 			tabContext, tabCancel := scraper.Browser.RunInNewTab()
 			defer tabCancel()
 			defer t.Testimonial.TestimonialWg.Done()
@@ -41,7 +45,12 @@ func (t *TestimonialService) ScrapeTestimonial(scraper *interfaces.ScraperClient
 			slog.Info("Starting Testimonial processor goroutine", slog.Int("goroutine id", i))
 
 			for scr := range scChan {
-
+				select {
+				case <-ctx.Done():
+					return
+				default:
+				}
+				slog.Info("company Name", slog.String("name of the company", scr.CompanyName))
 				err := chromedp.Run(tabContext,
 					chromedp.Navigate(scr.CompanyURL),
 					chromedp.WaitVisible("body"),
@@ -62,32 +71,25 @@ func (t *TestimonialService) ScrapeTestimonial(scraper *interfaces.ScraperClient
 
 				for j := range t.Testimonial.TNodes {
 					var fullURL string
-					fullURL = getAttr(tabContext, t.Testimonial.TNodes[j].FullXPath(), "src", e)
+					fullURL = getAttr(tabContext, t.Testimonial.TNodes[j].FullXPath(), "src", e, i)
 					if fullURL == "" || fullURL == "null" {
-						fullURL = getAttr(tabContext, t.Testimonial.TNodes[j].FullXPath(), "data-src", e)
+						fullURL = getAttr(tabContext, t.Testimonial.TNodes[j].FullXPath(), "data-src", e, i)
 					}
 					UrlArray = append(UrlArray, fullURL)
 				}
-				im <- UrlArray
-				slog.Info("successfully appended")
-				slog.Info("successfully appended")
-				slog.Info("successfully appended")
-				slog.Info("successfully appended")
-				slog.Info("successfully appended")
-				slog.Info("successfully appended")
-				slog.Info("successfully appended")
-				slog.Info("successfully appended")
-
+				select {
+				case im <- UrlArray:
+				case <-ctx.Done():
+					return
+				}
+				slog.Info("length of UrlARray of testimonials", slog.Int("length", len(UrlArray)))
 			}
 
 		}(i, scraper.Browser, scChan, t.Testimonial.TestimonialWg, t.Testimonial.ImageResultChan, scraper.Err)
 	}
 
-	// dd := make(chan []models.TestimonialResult, 50)
-
-	for i := 0; i < 5; i++ {
+	for i := 0; i < 2; i++ {
 		t.Testimonial.ImageWg.Add(1)
-
 		go func(workerID int) {
 			defer t.Testimonial.ImageWg.Done()
 
@@ -96,12 +98,13 @@ func (t *TestimonialService) ScrapeTestimonial(scraper *interfaces.ScraperClient
 			)
 
 			for urlArray := range t.Testimonial.ImageResultChan {
-				slog.Info("In processed Images of testimonials")
-				result := vision.ExtractImageFromText(urlArray, scraper.Err)
-
-				slog.Info("Processed testimonial images",
-					slog.Any("result", result),
-				)
+				select {
+				case <-ctx.Done():
+					return
+				default:
+				}
+				slog.Info("In processed Images of testimonials", slog.Int("worker id", workerID))
+				vision.ExtractImageFromText(urlArray, scraper.Err, workerID)
 			}
 		}(i)
 	}
@@ -109,10 +112,9 @@ func (t *TestimonialService) ScrapeTestimonial(scraper *interfaces.ScraperClient
 	t.Testimonial.TestimonialWg.Wait()
 	close(t.Testimonial.ImageResultChan)
 	t.Testimonial.ImageWg.Wait()
-
 }
 
-func getAttr(ctx context.Context, xpath string, attributeName string, e interfaces.ErrorClient) string {
+func getAttr(ctx context.Context, xpath string, attributeName string, e interfaces.ErrorClient, i int) string {
 	var url string
 	err := chromedp.Run(ctx, chromedp.JavascriptAttribute(xpath, attributeName, &url))
 	if err != nil {
@@ -124,7 +126,7 @@ func getAttr(ctx context.Context, xpath string, attributeName string, e interfac
 		return ""
 	}
 	if url != "" {
-		slog.Info("Extracted attribute", slog.String("URL", url))
+		slog.Info("Url extracted", slog.String("URL", url), slog.Int("of workerId", i))
 	}
 	return url
 }
