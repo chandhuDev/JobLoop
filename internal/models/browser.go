@@ -1,18 +1,15 @@
 package models
 
-import "context"
+import "github.com/playwright-community/playwright-go"
 
 type Browser struct {
-	AllocContext   context.Context
-	AllocCancel    context.CancelFunc
-	BrowserContext context.Context
-	BrowserCancel  context.CancelFunc
-	Options        Options
+	Playwright *playwright.Playwright
+	Browser    playwright.Browser
+	Options    Options
 }
 
 type Options struct {
 	Headless     bool
-	Disbale_gpu  bool
 	WindowWidth  int
 	WindowHeight int
 }

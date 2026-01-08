@@ -41,7 +41,6 @@ func main() {
 	}
 
 	browserOptions := models.Options{
-		Disbale_gpu:  true,
 		WindowWidth:  1920,
 		WindowHeight: 1080,
 	}
@@ -108,10 +107,10 @@ func main() {
 	g, gCtx := errgroup.WithContext(ctx)
 
 	go func() {
-        sig := <-sigChan
-        slog.Info("Signal received", "signal", sig)
-        cancel()
-    }()
+		sig := <-sigChan
+		slog.Info("Signal received", "signal", sig)
+		cancel()
+	}()
 
 	g.Go(func() error {
 		defer func() {
@@ -126,10 +125,10 @@ func main() {
 	g.Go(func() error {
 		defer func() {
 			if r := recover(); r != nil {
-				slog.Error("Panic in SeedCompany", "error", r)
+				slog.Error("Panic in Testimonial", "error", r)
 			}
 		}()
-		testimonial.ScrapeTestimonial(scraperClient, seedCompany.SeedCompany.ResultChan, *visionWrapper, gCtx)
+		testimonial.ScrapeTestimonial(scraperClient, seedCompany.SeedCompany.ResultChan, *visionWrapper)
 		return nil
 	})
 
@@ -138,5 +137,4 @@ func main() {
 	}
 
 	slog.Info("All work completed")
-
 }

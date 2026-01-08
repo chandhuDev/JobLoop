@@ -17,7 +17,7 @@ type VisionWrapper struct {
 
 func SetUpVision(vision *vision.ImageAnnotatorClient, context context.Context) *models.Vision {
 	return &models.Vision{
-		VisionClient: vision,
+		VisionClient:  vision,
 		VisionContext: context,
 	}
 }

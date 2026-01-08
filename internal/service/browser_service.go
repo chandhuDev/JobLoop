@@ -2,10 +2,9 @@ package service
 
 import (
 	"context"
-	"time"
 
 	"github.com/chandhuDev/JobLoop/internal/models"
-	"github.com/chromedp/chromedp"
+	"github.com/playwright-community/playwright-go"
 )
 
 type BrowserService struct {
@@ -13,41 +12,54 @@ type BrowserService struct {
 }
 
 func CreateNewBrowser(options models.Options, ctx context.Context) (*models.Browser, error) {
-	execOptions := append(chromedp.DefaultExecAllocatorOptions[:],
-		chromedp.Flag("headless", "new"),
-		chromedp.Flag("disable-gpu", options.Disbale_gpu),
-		chromedp.UserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"),
-		chromedp.Flag("disable-blink-features", "AutomationControlled"),
-		chromedp.Flag("disable-dev-shm-usage", true),
-        chromedp.Flag("no-sandbox", true),
-        chromedp.Flag("disable-setuid-sandbox", true),
-		chromedp.WindowSize(options.WindowWidth, options.WindowHeight),
-	)
-	allocContext, allocCancel := chromedp.NewExecAllocator(ctx, execOptions...)
-	browserContext, browserCancel := chromedp.NewContext(allocContext)
+	// Start Playwright
+	pw, err := playwright.Run()
+	if err != nil {
+		return nil, err
+	}
 
-	err := chromedp.Run(browserContext)
+	// Launch browser with options
+	browser, err := pw.Chromium.Launch(playwright.BrowserTypeLaunchOptions{
+		Headless: playwright.Bool(options.Headless),
+		Args: []string{
+			"--disable-gpu",
+			"--disable-blink-features=AutomationControlled",
+			"--disable-dev-shm-usage",
+			"--no-sandbox",
+			"--disable-setuid-sandbox",
+		},
+	})
+	if err != nil {
+		pw.Stop()
+		return nil, err
+	}
 
 	return &models.Browser{
-		AllocContext:   allocContext,
-		AllocCancel:    allocCancel,
-		BrowserContext: browserContext,
-		BrowserCancel:  browserCancel,
-		Options:        options,
-	}, err
+		Playwright: pw,
+		Browser:    browser,
+		Options:    options,
+	}, nil
 }
 
-func (b *BrowserService) RunInNewTab(actions ...chromedp.Action) (context.Context, context.CancelFunc) {
-	tabContext, tabCancel := chromedp.NewContext(b.Browser.BrowserContext)
-	timeoutCtx, timeoutCancel := context.WithTimeout(tabContext, 120*time.Second)
-
-	return timeoutCtx, func() {
-		timeoutCancel()
-		tabCancel()
+func (b *BrowserService) RunInNewTab() (playwright.Page, error) {
+	page, err := b.Browser.Browser.NewPage(playwright.BrowserNewPageOptions{
+		UserAgent: playwright.String("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"),
+		Viewport: &playwright.Size{
+			Width:  b.Browser.Options.WindowWidth,
+			Height: b.Browser.Options.WindowHeight,
+		},
+	})
+	if err != nil {
+		return nil, err
 	}
+	return page, nil
 }
 
 func (b *BrowserService) Close() {
-	b.Browser.BrowserCancel()
-	b.Browser.AllocCancel()
+	if b.Browser.Browser != nil {
+		b.Browser.Browser.Close()
+	}
+	if b.Browser.Playwright != nil {
+		b.Browser.Playwright.Stop()
+	}
 }

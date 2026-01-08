@@ -1,12 +1,10 @@
 package interfaces
 
 import (
-	"context"
-
-	"github.com/chromedp/chromedp"
+	"github.com/playwright-community/playwright-go"
 )
 
 type BrowserClient interface {
-	RunInNewTab(actions ...chromedp.Action) (context.Context, context.CancelFunc)
+	RunInNewTab() (playwright.Page, error)
 	Close()
 }
