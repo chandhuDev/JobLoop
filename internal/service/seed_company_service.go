@@ -68,24 +68,25 @@ func (s *SeedCompanyService) SeedCompanyConfigs(ctx context.Context, scraper *in
 }
 
 func (s *SeedCompanyService) GetSeedCompaniesFromPeerList(scraper *interfaces.ScraperClient, sp *models.SeedCompany, ctx context.Context) {
-	slog.Info("worker started for peerlist")
 
-	select {
-	case <-ctx.Done():
-		return
-	default:
-	}
+	// select {
+	// case <-ctx.Done():
+	// 	return
+	// default:
+	// }
+	slog.Info("worker started for peerlist")
 
 	tabContext, tabCancel := scraper.Browser.RunInNewTab()
 	defer tabCancel()
 
 	searchEngineKey := os.Getenv("GOOGLE_SEARCH_ENGINE")
 	namesChan := make(chan string, 50)
+	slog.Info("START processing for peerlist", slog.Time("time", time.Now()))
 
 	err := chromedp.Run(tabContext,
 		chromedp.Navigate(sp.URL),
 		chromedp.WaitReady("body"),
-		chromedp.Sleep(2*time.Second),
+		chromedp.Sleep(4*time.Second),
 		chromedp.Nodes(sp.Selector, &s.SeedCompany.PNodes, chromedp.AtLeast(0)),
 	)
 	if err != nil {
@@ -95,6 +96,7 @@ func (s *SeedCompanyService) GetSeedCompaniesFromPeerList(scraper *interfaces.Sc
 			Err:      err,
 		})
 	}
+	slog.Info("END processing for peerlist", slog.Time("time", time.Now()))
 
 	slog.Info("Found nodes with selector in peerlist",
 		slog.Int("length", len(s.SeedCompany.PNodes)),
@@ -105,6 +107,8 @@ func (s *SeedCompanyService) GetSeedCompaniesFromPeerList(scraper *interfaces.Sc
 		defer close(namesChan)
 
 		for i := 0; i < len(s.SeedCompany.PNodes); i++ {
+			slog.Info("sending names to namesChan")
+
 			if i == 3 {
 				break
 			}
@@ -119,11 +123,8 @@ func (s *SeedCompanyService) GetSeedCompaniesFromPeerList(scraper *interfaces.Sc
 			if err != nil {
 				continue
 			}
-			select {
-			case namesChan <- lastWord(urlText):
-			case <-ctx.Done():
-				return
-			}
+			namesChan <- lastWord(urlText)
+
 		}
 	}()
 
@@ -132,17 +133,13 @@ func (s *SeedCompanyService) GetSeedCompaniesFromPeerList(scraper *interfaces.Sc
 
 	for i := 0; i < workerCount; i++ {
 		searchWg.Add(1)
-		slog.Info("starting goroutine for peerlist search scraper", slog.Int("id", i))
 
 		go func(workerID int) {
 			defer searchWg.Done()
 
 			for name := range namesChan {
-				select {
-				case <-ctx.Done():
-					return
-				default:
-				}
+				slog.Info("starting goroutine for peerlist search scraper", slog.Int("id", i))
+
 				result, err := scraper.Search.SearchKeyWordInGoogle(
 					name, workerID, searchEngineKey,
 				)
@@ -154,15 +151,10 @@ func (s *SeedCompanyService) GetSeedCompaniesFromPeerList(scraper *interfaces.Sc
 					})
 					continue
 				}
-				select {
-				case s.SeedCompany.ResultChan <- models.SeedCompanyResult{
+				s.SeedCompany.ResultChan <- models.SeedCompanyResult{
 					CompanyName: name,
 					CompanyURL:  result,
-				}:
-				case <-ctx.Done():
-					return
 				}
-
 			}
 		}(i)
 	}
@@ -170,74 +162,59 @@ func (s *SeedCompanyService) GetSeedCompaniesFromPeerList(scraper *interfaces.Sc
 	searchWg.Wait()
 }
 
-func (s *SeedCompanyService) GetSeedCompaniesFromYCombinator(ctx context.Context, scraper *interfaces.ScraperClient, yc *models.SeedCompany, ) {
-	slog.Info("worker started for ycombinator")
-	var url string
-	var name string
-	
-	tabContext, tabCancel := scraper.Browser.RunInNewTab()
+func (s *SeedCompanyService) GetSeedCompaniesFromYCombinator(ctx context.Context, scraper *interfaces.ScraperClient, yc *models.SeedCompany) {
+    slog.Info("worker started for ycombinator")
+    
+    tabContext, tabCancel := scraper.Browser.RunInNewTab()
     defer tabCancel()
 
-	chromedp.Run(tabContext,
-		chromedp.Navigate(yc.URL),
-		chromedp.Sleep(yc.WaitTime),
-		chromedp.Nodes(yc.Selector, &s.SeedCompany.YCNodes, chromedp.AtLeast(0)),
-	)
-	slog.Info("Found nodes with selector in ycombinator", slog.Int("length of nodes", len(s.SeedCompany.YCNodes)), slog.String("for slector", yc.Selector), slog.String("for url", yc.URL))
+    chromedp.Run(tabContext,
+        chromedp.Navigate(yc.URL),
+        chromedp.Sleep(yc.WaitTime),
+        chromedp.Nodes(yc.Selector, &s.SeedCompany.YCNodes, chromedp.AtLeast(0)),
+    )
+    
+    slog.Info("Found nodes", slog.Int("length", len(s.SeedCompany.YCNodes)))
 
-	for i := range s.SeedCompany.YCNodes {
-		if i == 3 {
-			break
-		}
-		select {
-		case <-ctx.Done():
-			return
-		default:
-		}
+    for i := 0; i < 2; i++ {
+        if i >= len(s.SeedCompany.YCNodes) {
+            slog.Warn("Not enough nodes", slog.Int("have", len(s.SeedCompany.YCNodes)), slog.Int("need", i))
+            break
+        }
 
-		chromedp.Run(tabContext,
-			chromedp.Text(s.SeedCompany.YCNodes[i].FullXPath(), &name, chromedp.NodeVisible),
-		)
-		_, err := chromedp.RunResponse(tabContext,
-			chromedp.Click(s.SeedCompany.YCNodes[i].FullXPath()),
-		)
-		if err != nil {
-			scraper.Err.Send(models.WorkerError{
-				WorkerId: -1,
-				Message:  "error in clicking testimonial link",
-				Err:      err,
-			})
-		}
+        var url string
+        var name string
 
-		err2 := chromedp.Run(tabContext,
-			chromedp.AttributeValue(`div.group a`, "href", &url, nil),
-		)
-		if err2 != nil {
-			scraper.Err.Send(models.WorkerError{
-				WorkerId: -1,
-				Message:  "error in getting testimonial url:",
-				Err:      err2,
-			})
-		}
-		slog.Info("seed company Ycombinator", slog.String("CompanyName", name), slog.String("CompanyURL", url))
+        chromedp.Run(tabContext,
+            chromedp.Text(s.SeedCompany.YCNodes[i].FullXPath(), &name, chromedp.NodeVisible),
+        )
+        
+        chromedp.RunResponse(tabContext,
+            chromedp.Click(s.SeedCompany.YCNodes[i].FullXPath()),
+        )
 
-		chromedp.Run(tabContext,
-			chromedp.Navigate(yc.URL),
-			chromedp.Sleep(yc.WaitTime),
-			chromedp.Nodes(yc.Selector, &s.SeedCompany.YCNodes, chromedp.AtLeast(0)),
-		)
+        chromedp.Run(tabContext,
+            chromedp.AttributeValue(`div.group a`, "href", &url, nil),
+        )
+        
+        slog.Info("seed company Ycombinator", slog.String("CompanyName", name), slog.String("CompanyURL", url))
 
-		select {
-		case s.SeedCompany.ResultChan <- models.SeedCompanyResult{
-			CompanyName: name,
-			CompanyURL:  url,
-		}:
-		case <-ctx.Done():
-			return
-		}
+        s.SeedCompany.ResultChan <- models.SeedCompanyResult{
+            CompanyName: name,
+            CompanyURL:  url,
+        }
 
-	}
-
+        chromedp.Run(tabContext,
+            chromedp.Navigate(yc.URL),
+            chromedp.Sleep(yc.WaitTime),
+            chromedp.Nodes(yc.Selector, &s.SeedCompany.YCNodes, chromedp.AtLeast(0)),
+        )
+        
+        if len(s.SeedCompany.YCNodes) == 0 {
+            slog.Warn("No nodes after re-navigation")
+            break
+        }
+    }
 }
 
 func lastWord(text string) string {

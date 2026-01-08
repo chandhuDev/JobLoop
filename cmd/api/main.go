@@ -93,7 +93,7 @@ func main() {
 			Name:     "Peer list",
 			URL:      "https://peerlist.io/jobs",
 			Selector: `a[href^="/company/"][href*="/careers/"]`,
-			WaitTime: 2 * time.Second,
+			WaitTime: 3 * time.Second,
 		},
 	}
 	seedCompanyFirst := service.NewSeedCompanyScraper(SeedCompanyConfigs[0])
@@ -107,23 +107,28 @@ func main() {
 
 	g, gCtx := errgroup.WithContext(ctx)
 
-	g.Go(func() error {
-		select {
-		case sig := <-sigChan:
-			slog.Info("Signal received", "signal", sig)
-			cancel()
-			return nil
-		case <-gCtx.Done():
-			return nil
-		}
-	})
+	go func() {
+        sig := <-sigChan
+        slog.Info("Signal received", "signal", sig)
+        cancel()
+    }()
 
 	g.Go(func() error {
+		defer func() {
+			if r := recover(); r != nil {
+				slog.Error("Panic in SeedCompany", "error", r)
+			}
+		}()
 		seedCompany.SeedCompanyConfigs(gCtx, scraperClient)
 		return nil
 	})
 
 	g.Go(func() error {
+		defer func() {
+			if r := recover(); r != nil {
+				slog.Error("Panic in SeedCompany", "error", r)
+			}
+		}()
 		testimonial.ScrapeTestimonial(scraperClient, seedCompany.SeedCompany.ResultChan, *visionWrapper, gCtx)
 		return nil
 	})

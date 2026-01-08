@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"sync"
+	"time"
 
 	interfaces "github.com/chandhuDev/JobLoop/internal/interfaces"
 	models "github.com/chandhuDev/JobLoop/internal/models"
@@ -22,13 +23,7 @@ func NewTestimonial() *models.Testimonial {
 	}
 }
 
-func (t *TestimonialService) ScrapeTestimonial(scraper *interfaces.ScraperClient, scChan <-chan models.SeedCompanyResult, vision VisionWrapper, ctx context.Context) {
-
-	select {
-	case <-ctx.Done():
-		return
-	default:
-	}
+func (t *TestimonialService) ScrapeTestimonial(scraper *interfaces.ScraperClient, scChan <-chan models.SeedCompanyResult, vision VisionWrapper, ctxx context.Context) {
 	for i := 0; i < 3; i++ {
 		t.Testimonial.TestimonialWg.Add(1)
 
@@ -37,25 +32,22 @@ func (t *TestimonialService) ScrapeTestimonial(scraper *interfaces.ScraperClient
 			defer tabCancel()
 			defer t.Testimonial.TestimonialWg.Done()
 			xpath := `
-		  (
-			//*[contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'trust')]
-			  /following::*[count(.//img) >= 3][1]
-		  )//img
+		  //*[contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'trust')]
+  /following::*[count(.//img) >= 10][1]//img
 		  `
-			slog.Info("Starting Testimonial processor goroutine", slog.Int("goroutine id", i))
+			slog.Info("Starting Testimonial goroutine", slog.Int("goroutine id", i))
 
 			for scr := range scChan {
-				select {
-				case <-ctx.Done():
-					return
-				default:
-				}
-				slog.Info("company Name", slog.String("name of the company", scr.CompanyName))
+				
+				slog.Info("START processing", slog.String("company", scr.CompanyName), slog.Time("time", time.Now()))
+
 				err := chromedp.Run(tabContext,
 					chromedp.Navigate(scr.CompanyURL),
 					chromedp.WaitVisible("body"),
 					chromedp.Nodes(xpath, &t.Testimonial.TNodes, chromedp.BySearch, chromedp.AtLeast(0)),
 				)
+				slog.Info("END processing", slog.String("company", scr.CompanyName), slog.Time("time", time.Now()))
+
 				if err != nil {
 					e.Send(models.WorkerError{
 						WorkerId: i,
@@ -77,11 +69,8 @@ func (t *TestimonialService) ScrapeTestimonial(scraper *interfaces.ScraperClient
 					}
 					UrlArray = append(UrlArray, fullURL)
 				}
-				select {
-				case im <- UrlArray:
-				case <-ctx.Done():
-					return
-				}
+				im <- UrlArray
+
 				slog.Info("length of UrlARray of testimonials", slog.Int("length", len(UrlArray)))
 			}
 
@@ -93,16 +82,12 @@ func (t *TestimonialService) ScrapeTestimonial(scraper *interfaces.ScraperClient
 		go func(workerID int) {
 			defer t.Testimonial.ImageWg.Done()
 
-			slog.Info("Started image processor goroutine",
+			slog.Info("Started image goroutine",
 				slog.Int("goroutine_id", workerID),
 			)
 
 			for urlArray := range t.Testimonial.ImageResultChan {
-				select {
-				case <-ctx.Done():
-					return
-				default:
-				}
+				
 				slog.Info("In processed Images of testimonials", slog.Int("worker id", workerID))
 				vision.ExtractImageFromText(urlArray, scraper.Err, workerID)
 			}
