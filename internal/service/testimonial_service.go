@@ -19,7 +19,6 @@ func NewTestimonial() *models.Testimonial {
 		ImageResultChan: make(chan []string, 100),
 		TestimonialWg:   &sync.WaitGroup{},
 		ImageWg:         &sync.WaitGroup{},
-		// Remove TNodes - not needed with Playwright
 	}
 }
 
@@ -30,7 +29,6 @@ func (t *TestimonialService) ScrapeTestimonial(scraper *interfaces.ScraperClient
 		go func(workerID int) {
 			defer t.Testimonial.TestimonialWg.Done()
 
-			// Create a new page (equivalent to new tab)
 			page, err := scraper.Browser.RunInNewTab()
 			if err != nil {
 				scraper.Err.Send(models.WorkerError{
@@ -41,16 +39,14 @@ func (t *TestimonialService) ScrapeTestimonial(scraper *interfaces.ScraperClient
 				return
 			}
 			defer page.Close()
-
-			// XPath selector for testimonial images
-			xpath := `xpath=//*[contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'trust')]/following::*[count(.//img) >= 10][1]//img`
+		
+			xpath := `xpath=//*[self::h2 or self::p or self::span or self::div][contains(text(),'trust') or contains(text(),'Trust') or contains(text(),'customers') or contains(text(),'Customers')]/ancestor::*//img[(@width <= 200 or @height <= 200) or @loading='lazy'])`
 
 			slog.Info("Starting Testimonial goroutine", slog.Int("goroutine id", workerID))
 
 			for scr := range scChan {
 				slog.Info("START processing", slog.String("company", scr.CompanyName), slog.Time("time", time.Now()))
 
-				// Navigate to the company URL
 				_, err := page.Goto(scr.CompanyURL, playwright.PageGotoOptions{
 					WaitUntil: playwright.WaitUntilStateDomcontentloaded,
 					Timeout:   playwright.Float(30000),
@@ -64,15 +60,8 @@ func (t *TestimonialService) ScrapeTestimonial(scraper *interfaces.ScraperClient
 					continue
 				}
 
-				// Wait for body to be visible
-				page.WaitForSelector("body", playwright.PageWaitForSelectorOptions{
-					State:   playwright.WaitForSelectorStateVisible,
-					Timeout: playwright.Float(10000),
-				})
-
 				slog.Info("END processing", slog.String("company", scr.CompanyName), slog.Time("time", time.Now()))
 
-				// Find testimonial images using XPath
 				locator := page.Locator(xpath)
 				count, err := locator.Count()
 				if err != nil || count == 0 {
@@ -82,10 +71,10 @@ func (t *TestimonialService) ScrapeTestimonial(scraper *interfaces.ScraperClient
 
 				var urlArray []string
 
+				slog.Info("count of testimonials", slog.Int("count", count))
 				for j := 0; j < count; j++ {
 					img := locator.Nth(j)
 
-					// Try src first, then data-src
 					fullURL, _ := img.GetAttribute("src")
 					if fullURL == "" || fullURL == "null" {
 						fullURL, _ = img.GetAttribute("data-src")
@@ -93,7 +82,6 @@ func (t *TestimonialService) ScrapeTestimonial(scraper *interfaces.ScraperClient
 
 					if fullURL != "" {
 						urlArray = append(urlArray, fullURL)
-						slog.Info("Url extracted", slog.String("URL", fullURL), slog.Int("of workerId", workerID))
 					}
 				}
 
@@ -106,7 +94,6 @@ func (t *TestimonialService) ScrapeTestimonial(scraper *interfaces.ScraperClient
 		}(i)
 	}
 
-	// Image processing workers
 	for i := 0; i < 2; i++ {
 		t.Testimonial.ImageWg.Add(1)
 		go func(workerID int) {
@@ -116,8 +103,8 @@ func (t *TestimonialService) ScrapeTestimonial(scraper *interfaces.ScraperClient
 
 			for urlArray := range t.Testimonial.ImageResultChan {
 				slog.Info("In processed Images of testimonials", slog.Int("worker id", workerID))
-				vision.ExtractImageFromText(urlArray, scraper.Err, workerID)
-			}
+				abcd := vision.ExtractImageFromText(urlArray, scraper.Err, workerID)
+				slog.Info("message najnfjsanjfhnesjfjasifj", slog.Any("response", abcd))			}
 		}(i)
 	}
 

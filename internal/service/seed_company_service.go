@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"os"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -63,7 +64,6 @@ func (s *SeedCompanyService) SeedCompanyConfigs(ctx context.Context, scraper *in
 func (s *SeedCompanyService) GetSeedCompaniesFromPeerList(scraper *interfaces.ScraperClient, sp *models.SeedCompany, ctx context.Context) {
 	slog.Info("worker started for peerlist")
 
-	// Create new page instead of tab
 	page, err := scraper.Browser.RunInNewTab()
 	if err != nil {
 		scraper.Err.Send(models.WorkerError{
@@ -79,7 +79,6 @@ func (s *SeedCompanyService) GetSeedCompaniesFromPeerList(scraper *interfaces.Sc
 	namesChan := make(chan string, 50)
 	slog.Info("START processing for peerlist", slog.Time("time", time.Now()))
 
-	// Navigate and wait
 	if _, err := page.Goto(sp.URL, playwright.PageGotoOptions{
 		WaitUntil: playwright.WaitUntilStateDomcontentloaded,
 	}); err != nil {
@@ -91,10 +90,6 @@ func (s *SeedCompanyService) GetSeedCompaniesFromPeerList(scraper *interfaces.Sc
 		return
 	}
 
-	// Wait for page to settle
-	page.WaitForTimeout(4000)
-
-	// Get all matching elements
 	locator := page.Locator(sp.Selector)
 	count, err := locator.Count()
 	if err != nil {
@@ -107,6 +102,7 @@ func (s *SeedCompanyService) GetSeedCompaniesFromPeerList(scraper *interfaces.Sc
 	}
 
 	slog.Info("END processing for peerlist", slog.Time("time", time.Now()))
+
 	slog.Info("Found nodes with selector in peerlist",
 		slog.Int("length", count),
 		slog.String("selector", sp.Selector),
@@ -118,17 +114,15 @@ func (s *SeedCompanyService) GetSeedCompaniesFromPeerList(scraper *interfaces.Sc
 		for i := 0; i < count && i < 3; i++ {
 			slog.Info("sending names to namesChan")
 
-			// Get the nested p element text
-			// Adjust selector based on your DOM structure
 			item := locator.Nth(i)
-			pElement := item.Locator("div:nth-child(2) p")
-			
+			pElement := item.Locator("div:first-child > p")
+
 			urlText, err := pElement.TextContent()
 			if err != nil {
 				slog.Error("error getting text", slog.Any("error", err))
 				continue
 			}
-			
+
 			namesChan <- lastWord(urlText)
 		}
 	}()
@@ -183,16 +177,17 @@ func (s *SeedCompanyService) GetSeedCompaniesFromYCombinator(ctx context.Context
 		return
 	}
 
-	page.WaitForTimeout(float64(yc.WaitTime.Milliseconds()))
+	page.WaitForLoadState(playwright.PageWaitForLoadStateOptions{
+		State: playwright.LoadStateNetworkidle,
+	})
 
 	locator := page.Locator(yc.Selector)
 	count, _ := locator.Count()
-
-	slog.Info("Found nodes", slog.Int("length", count))
+	slog.Info("Found companies", slog.Int("count", count))
 
 	for i := 0; i < 2; i++ {
 		if i >= count {
-			slog.Warn("Not enough nodes", slog.Int("have", count), slog.Int("need", i))
+			slog.Warn("Not enough nodes in Ycombinator", slog.Int("have", count), slog.Int("need", i))
 			break
 		}
 
@@ -200,21 +195,19 @@ func (s *SeedCompanyService) GetSeedCompaniesFromYCombinator(ctx context.Context
 
 		name, err := item.TextContent()
 		if err != nil {
-			slog.Error("error getting name", slog.Any("error", err))
+			slog.Error("error getting at YC", slog.Any("error", err))
 			continue
 		}
 
 		if err := item.Click(); err != nil {
-			slog.Error("error clicking item", slog.Any("error", err))
+			slog.Error("error clicking item at YC", slog.Any("error", err))
 			continue
 		}
 
-		page.WaitForTimeout(1000)
-
-		urlLocator := page.Locator("div.group a")
+		urlLocator := page.Locator("div.group a").First()
 		url, err := urlLocator.GetAttribute("href")
 		if err != nil {
-			slog.Error("error getting url", slog.Any("error", err))
+			slog.Error("error getting url at YC", slog.Any("error", err))
 			url = ""
 		}
 
@@ -228,12 +221,16 @@ func (s *SeedCompanyService) GetSeedCompaniesFromYCombinator(ctx context.Context
 			CompanyURL:  url,
 		}
 
-		if _, err := page.Goto(yc.URL); err != nil {
+		if _, err := page.Goto(yc.URL, playwright.PageGotoOptions{
+			WaitUntil: playwright.WaitUntilStateDomcontentloaded,
+		}); err != nil {
 			slog.Error("error navigating back", slog.Any("error", err))
 			break
 		}
 
-		page.WaitForTimeout(float64(yc.WaitTime.Milliseconds()))
+		page.WaitForLoadState(playwright.PageWaitForLoadStateOptions{
+			State: playwright.LoadStateNetworkidle,
+		})
 
 		count, _ = locator.Count()
 		if count == 0 {
@@ -244,6 +241,10 @@ func (s *SeedCompanyService) GetSeedCompaniesFromYCombinator(ctx context.Context
 }
 
 func lastWord(text string) string {
+	re := regexp.MustCompile(`\d+[hdwm]\s*ago`)
+	text = re.ReplaceAllString(text, "")
+	text = strings.TrimSpace(text)
+
 	fields := strings.Fields(text)
 	if len(fields) == 0 {
 		return ""

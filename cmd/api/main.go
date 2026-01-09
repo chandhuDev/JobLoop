@@ -41,7 +41,8 @@ func main() {
 	}
 
 	browserOptions := models.Options{
-		WindowWidth:  1920,
+		Headless: true,
+        WindowWidth:  1920,
 		WindowHeight: 1080,
 	}
 	browserInstance, browserError := service.CreateNewBrowser(browserOptions, ctx)
@@ -85,7 +86,7 @@ func main() {
 		{
 			Name:     "Y Combinator",
 			URL:      "http://www.ycombinator.com/companies",
-			Selector: `span[class^="_coName_i9oky_470"]`,
+			Selector: `a[href^="/companies/"]`,
 			WaitTime: 3 * time.Second,
 		},
 		{
