@@ -5,13 +5,18 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"os"
+	"sync"
 
 	"github.com/chandhuDev/JobLoop/internal/interfaces"
 	models "github.com/chandhuDev/JobLoop/internal/models"
+	"google.golang.org/protobuf/encoding/protojson"
 
 	vision "cloud.google.com/go/vision/apiv1"
 	visionpb "cloud.google.com/go/vision/v2/apiv1/visionpb"
 )
+
+var fileMutex sync.Mutex
 
 type VisionWrapper struct {
 	Vision *models.Vision
@@ -35,12 +40,13 @@ func (v *VisionWrapper) ExtractImageFromText(ImageUrlArrays []string, errHandler
 	var requests []*visionpb.AnnotateImageRequest
 	var validURLs []string
 
-	testURL := "https://www.fieldguide.io/hs-fs/hubfs/Fieldguide/Images/ce_wa-logo-.png?width=640&height=188&name=ce_wa-logo-.png"
+	// testURL := "https://devguide.payu.in/website-assets/uploads/2022/07/bookmyshow.webp"
 
-	abcd := []string{
-		testURL,
-	}
-	for _, imageURL := range abcd {
+	// abcd := []string{
+	// 	testURL,
+	// }
+	for _, imageURL := range ImageUrlArrays {
+		slog.Info("successfully read bytes from image", slog.String("url", imageURL))
 
 		imageBytes, err := downloadImage(imageURL)
 		if err != nil {
@@ -50,8 +56,6 @@ func (v *VisionWrapper) ExtractImageFromText(ImageUrlArrays []string, errHandler
 			)
 			continue
 		}
-
-		slog.Info("bytes", slog.Any("bytes", imageBytes))
 
 		image := &visionpb.Image{
 			Content: imageBytes,
@@ -80,7 +84,7 @@ func (v *VisionWrapper) ExtractImageFromText(ImageUrlArrays []string, errHandler
 	}
 
 	resp, err := v.Vision.VisionClient.BatchAnnotateImages(v.Vision.VisionContext, batchReq)
-	slog.Info("ee", slog.Any("dd", resp))
+	// slog.Info("vision", slog.Any("response", resp))
 	if err != nil {
 		errHandler.Send(models.WorkerError{
 			WorkerId: w,
@@ -110,7 +114,38 @@ func (v *VisionWrapper) ExtractImageFromText(ImageUrlArrays []string, errHandler
 		}
 	}
 
+	// saveFullResponseToJSON(resp, validURLs)
+
 	return resultsArray
+}
+
+func saveFullResponseToJSON(resp *visionpb.BatchAnnotateImagesResponse, urls []string) {
+	fileMutex.Lock()
+	defer fileMutex.Unlock()
+
+	// Convert protobuf to JSON
+	jsonBytes, err := protojson.MarshalOptions{
+		Multiline: true,
+		Indent:    "  ",
+	}.Marshal(resp)
+
+	if err != nil {
+		slog.Error("Failed to marshal response", slog.Any("error", err))
+		return
+	}
+
+	// Append to file
+	f, err := os.OpenFile("vision_results.json", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		slog.Error("Failed to open file", slog.Any("error", err))
+		return
+	}
+	defer f.Close()
+
+	f.Write(jsonBytes)
+	f.WriteString("\n---\n") // Separator between batches
+
+	slog.Info("Saved full response to JSON")
 }
 
 func downloadImage(imageURL string) ([]byte, error) {

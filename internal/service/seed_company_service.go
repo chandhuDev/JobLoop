@@ -101,8 +101,6 @@ func (s *SeedCompanyService) GetSeedCompaniesFromPeerList(scraper *interfaces.Sc
 		return
 	}
 
-	slog.Info("END processing for peerlist", slog.Time("time", time.Now()))
-
 	slog.Info("Found nodes with selector in peerlist",
 		slog.Int("length", count),
 		slog.String("selector", sp.Selector),
@@ -141,6 +139,8 @@ func (s *SeedCompanyService) GetSeedCompaniesFromPeerList(scraper *interfaces.Sc
 				result, err := scraper.Search.SearchKeyWordInGoogle(
 					name, workerID, searchEngineKey,
 				)
+				slog.Info("company result", slog.String("url", result))
+
 				if err != nil {
 					scraper.Err.Send(models.WorkerError{
 						WorkerId: workerID,
