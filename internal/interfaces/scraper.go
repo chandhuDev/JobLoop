@@ -2,7 +2,6 @@ package interfaces
 
 import (
 	vision "cloud.google.com/go/vision/apiv1"
-	"gorm.io/gorm"
 )
 
 type ScraperClient struct {
@@ -10,5 +9,5 @@ type ScraperClient struct {
 	Search  SearchClient
 	Vision  *vision.ImageAnnotatorClient
 	Err     ErrorClient
-	DbClient *gorm.DB
+	DbClient DatabaseClient
 }

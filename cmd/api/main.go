@@ -93,7 +93,7 @@ func main() {
 	visionConfig := service.SetUpVision(visionInstance, ctx)
 	visionWrapper := &service.VisionWrapper{Vision: visionConfig}
 
-	scraperClient := service.SetUpScraperClient(browser, visionInstance, search, errInstance)
+	scraperClient := service.SetUpScraperClient(browser, visionInstance, search, errInstance, dbSvc)
 
 	SeedCompanyConfigs := []models.SeedCompany{
 		{
