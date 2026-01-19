@@ -11,6 +11,7 @@ type SeedCompanies struct {
 	CompanyURL string 
 	Visited bool
 	Time time.Time
+	Status string
 	TestimonialCompanies []TestimonialCompanies `gorm:"foreignKey:SeedCompanyID"`
 }
 

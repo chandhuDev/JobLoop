@@ -16,6 +16,7 @@ func CreateSeedCompanyRepository(cd models.SeedCompanyResult, TestimonialArray [
 		Visited:              false,
 		Time:                 time.Now(),
 		TestimonialCompanies: TestimonialArray,
+		
 	}
 }
 
