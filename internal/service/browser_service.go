@@ -12,13 +12,11 @@ type BrowserService struct {
 }
 
 func CreateNewBrowser(options models.Options, ctx context.Context) (*models.Browser, error) {
-	// Start Playwright
 	pw, err := playwright.Run()
 	if err != nil {
 		return nil, err
 	}
 
-	// Launch browser with options
 	browser, err := pw.Chromium.Launch(playwright.BrowserTypeLaunchOptions{
 		Headless: playwright.Bool(options.Headless),
 		Args: []string{

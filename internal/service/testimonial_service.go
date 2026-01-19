@@ -69,10 +69,14 @@ func (t *TestimonialService) ScrapeTestimonial(scraper *interfaces.ScraperClient
 					continue
 				}
 				slog.Info("Navigation successful", slog.String("company", scr.CompanyName))
-
 				locator := page.Locator(xpath)
 
 				count, err := locator.Count()
+				slog.Info("counting testimonial parent nodes", slog.String("company Name", scr.CompanyName))
+				slog.Info("counting testimonial parent nodes", slog.String("company Name", scr.CompanyName))
+				slog.Info("counting testimonial parent nodes", slog.String("company Name", scr.CompanyName))
+				slog.Info("counting testimonial parent nodes", slog.String("company Name", scr.CompanyName))
+				slog.Info("counting testimonial parent nodes", slog.String("company Name", scr.CompanyName))
 
 				slog.Info("count of testimonial nodes", slog.Int("count", count))
 				if err != nil || count == 0 {

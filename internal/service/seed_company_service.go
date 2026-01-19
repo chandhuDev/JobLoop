@@ -48,11 +48,16 @@ func (s *SeedCompanyService) SeedCompanyConfigs(ctx context.Context, scraper *in
 				s.GetSeedCompaniesFromPeerList(scraper, &sp, ctx)
 			}(s.SeedCompany.Companies[i])
 		} else {
-			s.SeedCompany.YCWg.Add(1)
-			go func(yc models.SeedCompany) {
-				defer s.SeedCompany.YCWg.Done()
-				s.GetSeedCompaniesFromYCombinator(ctx, scraper, &yc)
-			}(s.SeedCompany.Companies[i])
+			slog.Info("in ycomnibator go routine")
+			slog.Info("in ycomnibator go routine")
+			slog.Info("in ycomnibator go routine")
+			slog.Info("in ycomnibator go routine")
+
+			// s.SeedCompany.YCWg.Add(1)
+			// go func(yc models.SeedCompany) {
+			// 	defer s.SeedCompany.YCWg.Done()
+			// 	s.GetSeedCompaniesFromYCombinator(ctx, scraper, &yc)
+			// }(s.SeedCompany.Companies[i])
 		}
 	}
 

@@ -14,6 +14,8 @@ import (
 
 	service "github.com/chandhuDev/JobLoop/internal/service"
 	"github.com/joho/godotenv"
+
+	dbService "github.com/chandhuDev/JobLoop/internal/database"
 )
 
 func main() {
@@ -40,9 +42,20 @@ func main() {
 		})
 	}
 
+	dbInstance := dbService.ConnectDatabase()
+	dbSvc := &dbService.DatabaseService{DB: dbInstance}
+	err := dbSvc.CreateSchema()
+	if err != nil {
+		errInstance.Send(models.WorkerError{
+			WorkerId: -1,
+			Message:  "error in creating Database instance client",
+			Err:      err,
+		})
+	}
+
 	browserOptions := models.Options{
-		Headless: true,
-        WindowWidth:  1920,
+		Headless:     true,
+		WindowWidth:  1920,
 		WindowHeight: 1080,
 	}
 	browserInstance, browserError := service.CreateNewBrowser(browserOptions, ctx)
