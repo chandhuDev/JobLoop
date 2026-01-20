@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"fmt"
 	"log/slog"
 
 	models "github.com/chandhuDev/JobLoop/internal/models"
@@ -8,11 +9,29 @@ import (
 	"gorm.io/gorm"
 )
 
-func CreateSeedCompanyRepository(cd models.SeedCompanyResult, TestimonialArray []schema.TestimonialCompany) schema.SeedCompany {
+func CreateSeedCompanyRepository(sm models.SeedCompanyResult) schema.SeedCompany {
 	return schema.SeedCompany{
-		CompanyName: cd.CompanyName,
-		CompanyURL:  cd.CompanyURL,
+		CompanyName: sm.CompanyName,
+		CompanyURL:  sm.CompanyURL,
+		Visited:     true,
 	}
+}
+
+func Update(scid uint, DB *gorm.DB, flags map[string]interface{},
+) error {
+	allowed := map[string]bool{
+		"TestimonialScraped": true,
+		"JobScraped":         true,
+	}
+	for key := range flags {
+		if !allowed[key] {
+			return fmt.Errorf("invalid property: %s", key)
+		}
+	}
+	return DB.Model(&schema.SeedCompany{}).
+		Where("id = ?", scid).
+		Updates(flags).
+		Error
 }
 
 func CreateSeedCompany(seedCompany schema.SeedCompany, DB *gorm.DB) error {
