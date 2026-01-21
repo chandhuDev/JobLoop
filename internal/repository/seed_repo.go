@@ -17,7 +17,7 @@ func CreateSeedCompanyRepository(sm models.SeedCompanyResult) schema.SeedCompany
 	}
 }
 
-func Update(scid uint, DB *gorm.DB, flags map[string]interface{},
+func UpdateSeedCompanyData(scid uint, DB *gorm.DB, flags map[string]interface{},
 ) error {
 	allowed := map[string]bool{
 		"TestimonialScraped": true,

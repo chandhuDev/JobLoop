@@ -7,7 +7,7 @@ import (
 )
 
 func BulkUpsertTestimonials(
-	db *gorm.DB,
+	DB *gorm.DB,
 	seedID uint,
 	names []string,
 ) error {
@@ -21,9 +21,9 @@ func BulkUpsertTestimonials(
 		})
 	}
 
-	return db.Clauses(clause.OnConflict{
+	return DB.Clauses(clause.OnConflict{
 		Columns: []clause.Column{
-			{Name: "companyName"},
+			{Name: "company_name"},
 		},
 		DoNothing: true,
 	}).Create(&records).Error
