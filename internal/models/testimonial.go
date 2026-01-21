@@ -9,9 +9,10 @@ type Testimonial struct {
 	ImageWg         *sync.WaitGroup
 	ImageResultChan chan []string
 	Err             ErrorHandler
+	SeedCompanyId   uint
 }
 
 type TestimonialResult struct {
 	Name string
-	Uri  string
+	// Uri  string
 }

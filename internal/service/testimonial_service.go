@@ -8,6 +8,7 @@ import (
 
 	interfaces "github.com/chandhuDev/JobLoop/internal/interfaces"
 	models "github.com/chandhuDev/JobLoop/internal/models"
+	"github.com/chandhuDev/JobLoop/internal/repository"
 	"github.com/playwright-community/playwright-go"
 )
 
@@ -46,6 +47,7 @@ func (t *TestimonialService) ScrapeTestimonial(scraper *interfaces.ScraperClient
 			slog.Info("Starting Testimonial goroutine", slog.Int("goroutine id", workerID))
 
 			for scr := range scChan {
+				t.Testimonial.SeedCompanyId = scr.SeedCompanyId
 				slog.Info("START processing", slog.String("company", scr.CompanyName), slog.Time("time", time.Now()))
 				url := scr.CompanyURL
 				if !strings.HasPrefix(url, "http://") && !strings.HasPrefix(url, "https://") {
@@ -166,7 +168,6 @@ func (t *TestimonialService) ScrapeTestimonial(scraper *interfaces.ScraperClient
 			}
 		}(i)
 	}
-
 	for i := 0; i < 2; i++ {
 		t.Testimonial.ImageWg.Add(1)
 		go func(workerID int) {
@@ -174,7 +175,10 @@ func (t *TestimonialService) ScrapeTestimonial(scraper *interfaces.ScraperClient
 
 			for urlArray := range t.Testimonial.ImageResultChan {
 				slog.Info("Processing images", slog.Int("worker_id", workerID), slog.Int("url_count", len(urlArray)))
-				vision.ExtractImageFromText(urlArray, scraper.Err, workerID)
+				VisionResultArray := vision.ExtractImageFromText(urlArray, scraper.Err, workerID)
+				if err := repository.BulkUpsertTestimonials(scraper.DbClient.GetDB(), t.Testimonial.SeedCompanyId, VisionResultArray); err!=nil{
+					slog.Error("error upserting testimonial images", slog.Any("error", err))
+				}
 			}
 		}(i)
 	}

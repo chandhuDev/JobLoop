@@ -11,6 +11,7 @@ import (
 
 	"github.com/chandhuDev/JobLoop/internal/interfaces"
 	"github.com/chandhuDev/JobLoop/internal/models"
+	"github.com/chandhuDev/JobLoop/internal/repository"
 	"github.com/playwright-community/playwright-go"
 )
 
@@ -144,7 +145,6 @@ func (s *SeedCompanyService) GetSeedCompaniesFromPeerList(scraper *interfaces.Sc
 				result, err := scraper.Search.SearchKeyWordInGoogle(
 					name, workerID, searchEngineKey,
 				)
-				slog.Info("company result", slog.String("url", result))
 
 				if err != nil {
 					scraper.Err.Send(models.WorkerError{
@@ -154,9 +154,20 @@ func (s *SeedCompanyService) GetSeedCompaniesFromPeerList(scraper *interfaces.Sc
 					})
 					continue
 				}
+				scr := repository.CreateSeedCompanyRepository(name, result)
+				if err := repository.CreateSeedCompany(scr, scraper.DbClient.GetDB()); err != nil {
+					scraper.Err.Send(models.WorkerError{
+						WorkerId: workerID,
+						Message:  "error creating seed company in DB",
+						Err:      err,
+					})
+				}
+
+				slog.Info("company result", slog.String("url", result))
 				s.SeedCompany.ResultChan <- models.SeedCompanyResult{
-					CompanyName: name,
-					CompanyURL:  result,
+					CompanyName:   name,
+					CompanyURL:    result,
+					SeedCompanyId: scr.ID,
 				}
 			}
 		}(i)
@@ -221,9 +232,15 @@ func (s *SeedCompanyService) GetSeedCompaniesFromYCombinator(ctx context.Context
 			slog.String("CompanyURL", url),
 		)
 
+		scr := repository.CreateSeedCompanyRepository(name, url)
+		if err := repository.CreateSeedCompany(scr, scraper.DbClient.GetDB()); err != nil {
+			slog.Error("error creating seed company at DB", slog.Any("error", err))
+		}
+
 		s.SeedCompany.ResultChan <- models.SeedCompanyResult{
-			CompanyName: name,
-			CompanyURL:  url,
+			CompanyName:   name,
+			CompanyURL:    url,
+			SeedCompanyId: scr.ID,
 		}
 
 		if _, err := page.Goto(yc.URL, playwright.PageGotoOptions{

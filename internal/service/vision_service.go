@@ -34,7 +34,7 @@ func CreateVisionInstance(context context.Context) (*vision.ImageAnnotatorClient
 	return v, err
 }
 
-func (v *VisionWrapper) ExtractImageFromText(ImageUrlArrays []string, errHandler interfaces.ErrorClient, w int) []models.TestimonialResult {
+func (v *VisionWrapper) ExtractImageFromText(ImageUrlArrays []string, errHandler interfaces.ErrorClient, w int) []string {
 	slog.Info("we are starting vision scraper")
 
 	var requests []*visionpb.AnnotateImageRequest
@@ -99,19 +99,16 @@ func (v *VisionWrapper) ExtractImageFromText(ImageUrlArrays []string, errHandler
 		return nil
 	}
 
-	var resultsArray []models.TestimonialResult
-	for i, r := range resp.Responses {
+	var resultsArray []string
+	for _, r := range resp.Responses {
 		if r.Error != nil {
 			slog.Error("Vision error", slog.String("msg", r.Error.Message))
 			continue
 		}
 
 		if len(r.TextAnnotations) > 0 {
-			resultsArray = append(resultsArray, models.TestimonialResult{
-				Name: r.TextAnnotations[0].Description,
-				Uri:  validURLs[i],
-			})
-		}
+			resultsArray = append(resultsArray, r.TextAnnotations[0].Description) // Uri:  validURLs[i],
+        }
 	}
 
 	// saveFullResponseToJSON(resp, validURLs)

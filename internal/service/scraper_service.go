@@ -7,10 +7,10 @@ import (
 
 func SetUpScraperClient(browser interfaces.BrowserClient, vision *vision.ImageAnnotatorClient, search interfaces.SearchClient, err interfaces.ErrorClient, dbClient interfaces.DatabaseClient) *interfaces.ScraperClient {
 	return &interfaces.ScraperClient{
-		Browser: browser,
-		Vision:  vision,
-		Search:  search,
-		Err:     err,
-		DbClient:      dbClient,
+		Browser:  browser,
+		Vision:   vision,
+		Search:   search,
+		Err:      err,
+		DbClient: dbClient,
 	}
 }

@@ -32,10 +32,15 @@ func ConnectDatabase() *models.Database {
 	}
 
 	return &models.Database{
-		DB: dbInstance}
+		DB: dbInstance,
+	}
 }
 
 func (db *DatabaseService) CreateSchema() error {
 	err := db.DB.DB.AutoMigrate(&schema.SeedCompany{}, &schema.TestimonialCompany{}, &schema.Job{})
 	return err
+}
+
+func (db *DatabaseService) GetDB() *gorm.DB {
+	return db.DB.DB
 }

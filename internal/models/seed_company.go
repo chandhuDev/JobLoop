@@ -16,6 +16,7 @@ type SeedCompany struct {
 type SeedCompanyResult struct {
 	CompanyName string
 	CompanyURL  string
+	SeedCompanyId uint
 }
 
 type SeedCompanyArray struct {

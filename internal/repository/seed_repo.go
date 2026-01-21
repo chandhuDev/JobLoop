@@ -4,15 +4,14 @@ import (
 	"fmt"
 	"log/slog"
 
-	models "github.com/chandhuDev/JobLoop/internal/models"
 	"github.com/chandhuDev/JobLoop/internal/schema"
 	"gorm.io/gorm"
 )
 
-func CreateSeedCompanyRepository(sm models.SeedCompanyResult) schema.SeedCompany {
+func CreateSeedCompanyRepository(scn string, scu string) schema.SeedCompany {
 	return schema.SeedCompany{
-		CompanyName: sm.CompanyName,
-		CompanyURL:  sm.CompanyURL,
+		CompanyName: scn,
+		CompanyURL:  scu,
 		Visited:     true,
 	}
 }
