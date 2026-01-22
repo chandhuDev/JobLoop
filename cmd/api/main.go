@@ -3,6 +3,7 @@ package main
 import (
 	"log/slog"
 	"os"
+
 	"time"
 
 	"context"
@@ -12,10 +13,9 @@ import (
 	models "github.com/chandhuDev/JobLoop/internal/models"
 	"golang.org/x/sync/errgroup"
 
+	dbService "github.com/chandhuDev/JobLoop/internal/database"
 	service "github.com/chandhuDev/JobLoop/internal/service"
 	"github.com/joho/godotenv"
-
-	dbService "github.com/chandhuDev/JobLoop/internal/database"
 )
 
 func main() {
@@ -75,6 +75,7 @@ func main() {
 		slog.Info("Cleanup complete")
 	}()
 
+	service.ScrapeJobs(*browser)
 	searchInstance, searchInstanceError := service.CreateSearchService(ctx)
 	errInstance.Send(models.WorkerError{
 		WorkerId: -1,

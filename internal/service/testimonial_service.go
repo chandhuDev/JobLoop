@@ -175,7 +175,7 @@ func (t *TestimonialService) ScrapeTestimonial(scraper *interfaces.ScraperClient
 
 			for urlArray := range t.Testimonial.ImageResultChan {
 				slog.Info("Processing images", slog.Int("worker_id", workerID), slog.Int("url_count", len(urlArray)))
-				VisionResultArray := vision.ExtractImageFromText(urlArray, scraper.Err, workerID)
+				VisionResultArray := vision.ExtractTextFromImage(urlArray, scraper.Err, workerID)
 				if err := repository.BulkUpsertTestimonials(scraper.DbClient.GetDB(), t.Testimonial.SeedCompanyId, VisionResultArray); err!=nil{
 					slog.Error("error upserting testimonial images", slog.Any("error", err))
 				}

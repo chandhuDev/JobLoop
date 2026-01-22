@@ -34,7 +34,7 @@ func CreateVisionInstance(context context.Context) (*vision.ImageAnnotatorClient
 	return v, err
 }
 
-func (v *VisionWrapper) ExtractImageFromText(ImageUrlArrays []string, errHandler interfaces.ErrorClient, w int) []string {
+func (v *VisionWrapper) ExtractTextFromImage(ImageUrlArrays []string, errHandler interfaces.ErrorClient, w int) []string {
 	slog.Info("we are starting vision scraper")
 
 	var requests []*visionpb.AnnotateImageRequest
