@@ -2,6 +2,7 @@ package service
 
 import (
 	"log/slog"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -176,8 +177,34 @@ func (t *TestimonialService) ScrapeTestimonial(scraper *interfaces.ScraperClient
 			for urlArray := range t.Testimonial.ImageResultChan {
 				slog.Info("Processing images", slog.Int("worker_id", workerID), slog.Int("url_count", len(urlArray)))
 				VisionResultArray := vision.ExtractTextFromImage(urlArray, scraper.Err, workerID)
-				if err := repository.BulkUpsertTestimonials(scraper.DbClient.GetDB(), t.Testimonial.SeedCompanyId, VisionResultArray); err!=nil{
+				if err := repository.BulkUpsertTestimonials(scraper.DbClient.GetDB(), t.Testimonial.SeedCompanyId, VisionResultArray); err != nil {
 					slog.Error("error upserting testimonial images", slog.Any("error", err))
+				}
+				searchEngineKey := os.Getenv("GOOGLE_SEARCH_ENGINE")
+
+				for _, name := range VisionResultArray {
+					slog.Info("starting goroutine for peerlist search scraper", slog.Int("id", workerID))
+
+					result, err := scraper.Search.SearchKeyWordInGoogle(
+						name, workerID, searchEngineKey,
+					)
+
+					if err != nil {
+						scraper.Err.Send(models.WorkerError{
+							WorkerId: workerID,
+							Message:  "error searching google",
+							Err:      err,
+						})
+						continue
+					}
+					scr := repository.CreateSeedCompanyRepository(name, result)
+					if err := repository.CreateSeedCompany(scr, scraper.DbClient.GetDB()); err != nil {
+						scraper.Err.Send(models.WorkerError{
+							WorkerId: workerID,
+							Message:  "error creating seed company in DB",
+							Err:      err,
+						})
+					}
 				}
 			}
 		}(i)
