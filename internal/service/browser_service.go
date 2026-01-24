@@ -11,7 +11,7 @@ type BrowserService struct {
 	Browser *models.Browser
 }
 
-func CreateNewBrowser(options models.Options, ctx context.Context) (*models.Browser, error) {
+func CreateNewBrowser(options models.Options, ctx context.Context) (*BrowserService, error) {
 	pw, err := playwright.Run()
 	if err != nil {
 		return nil, err
@@ -32,10 +32,12 @@ func CreateNewBrowser(options models.Options, ctx context.Context) (*models.Brow
 		return nil, err
 	}
 
-	return &models.Browser{
-		Playwright: pw,
-		Browser:    browser,
-		Options:    options,
+	return &BrowserService{
+		Browser: &models.Browser{
+			Playwright: pw,
+			Browser:    browser,
+			Options:    options,
+		},
 	}, nil
 }
 

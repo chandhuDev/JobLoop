@@ -64,18 +64,17 @@ func main() {
 		Message:  "error in creating browser instance",
 		Err:      browserError,
 	})
-	browser := &service.BrowserService{Browser: browserInstance}
 
 	defer func() {
 		if r := recover(); r != nil {
 			slog.Info("Panic recovered: %v", r)
 		}
 		slog.Info("Cleaning up...")
-		browser.Close()
+		browserInstance.Close()
 		slog.Info("Cleanup complete")
 	}()
 
-	service.ScrapeJobs(*browser)
+	// service.ScrapeJobs(*browser)
 	searchInstance, searchInstanceError := service.CreateSearchService(ctx)
 	errInstance.Send(models.WorkerError{
 		WorkerId: -1,
@@ -85,16 +84,18 @@ func main() {
 	searchConfig := service.SetUpSearch(searchInstance)
 	search := &service.SearchService{Search: searchConfig}
 
+	namesChannel := service.CreateNamesChannel(200)
+
 	visionInstance, visionInstanceError := service.CreateVisionInstance(ctx)
 	errInstance.Send(models.WorkerError{
 		WorkerId: -1,
 		Message:  "error in creating google vision instance",
 		Err:      visionInstanceError,
 	})
-	visionConfig := service.SetUpVision(visionInstance, ctx)
+	visionConfig := service.SetUpVision(visionInstance, ctx, namesChannel.ReturnNamesChan())
 	visionWrapper := &service.VisionWrapper{Vision: visionConfig}
 
-	scraperClient := service.SetUpScraperClient(browser, visionInstance, search, errInstance, dbSvc)
+	scraperClient := service.SetUpScraperClient(browserInstance, visionInstance, search, errInstance, dbSvc, namesChannel.ReturnNamesChan())
 
 	SeedCompanyConfigs := []models.SeedCompany{
 		{

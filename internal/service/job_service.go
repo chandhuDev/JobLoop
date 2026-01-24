@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/chandhuDev/JobLoop/internal/interfaces"
 	"github.com/playwright-community/playwright-go"
 )
 
@@ -49,7 +50,6 @@ var (
 		"faq", "help", "support",
 	}
 
-	// Selectors to REMOVE from DOM before extracting links
 	excludeSelectors = []string{
 		"header", "footer", "nav", "aside",
 		"[role='navigation']", "[role='banner']", "[role='contentinfo']",
@@ -60,8 +60,8 @@ var (
 	}
 )
 
-func ScrapeJobs(browser BrowserService) ([]LinkData, error) {
-	var companyUrl = strings.TrimSpace("https://www.mux.com/")
+func ScrapeJobs(browser interfaces.BrowserClient, companyUrl string) ([]LinkData, error) {
+	// var companyUrl = strings.TrimSpace("https://www.mux.com/")
 
 	page, err := browser.RunInNewTab()
 	if err != nil {
@@ -125,14 +125,12 @@ func ScrapeJobs(browser BrowserService) ([]LinkData, error) {
 
 func removeNoisySections(page playwright.Page) {
 	for _, selector := range excludeSelectors {
-		// Use JavaScript to remove elements
 		script := fmt.Sprintf(`
 			document.querySelectorAll('%s').forEach(el => el.remove());
 		`, selector)
 
 		_, err := page.Evaluate(script)
 		if err != nil {
-			// Selector might not exist, that's fine
 			continue
 		}
 	}

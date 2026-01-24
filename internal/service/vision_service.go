@@ -10,6 +10,7 @@ import (
 
 	"github.com/chandhuDev/JobLoop/internal/interfaces"
 	models "github.com/chandhuDev/JobLoop/internal/models"
+	"github.com/chandhuDev/JobLoop/internal/repository"
 	"google.golang.org/protobuf/encoding/protojson"
 
 	vision "cloud.google.com/go/vision/apiv1"
@@ -22,10 +23,11 @@ type VisionWrapper struct {
 	Vision *models.Vision
 }
 
-func SetUpVision(vision *vision.ImageAnnotatorClient, context context.Context) *models.Vision {
+func SetUpVision(vision *vision.ImageAnnotatorClient, context context.Context, namesChannel *models.NamesClient) *models.Vision {
 	return &models.Vision{
 		VisionClient:  vision,
 		VisionContext: context,
+		NamesChan:     namesChannel,
 	}
 }
 
@@ -34,7 +36,7 @@ func CreateVisionInstance(context context.Context) (*vision.ImageAnnotatorClient
 	return v, err
 }
 
-func (v *VisionWrapper) ExtractTextFromImage(ImageUrlArrays []string, errHandler interfaces.ErrorClient, w int) []string {
+func (v *VisionWrapper) ExtractTextFromImage(ImageUrlArrays []string, scraper *interfaces.ScraperClient, w int, seedCompanyId uint) {
 	slog.Info("we are starting vision scraper")
 
 	var requests []*visionpb.AnnotateImageRequest
@@ -76,7 +78,6 @@ func (v *VisionWrapper) ExtractTextFromImage(ImageUrlArrays []string, errHandler
 
 	if len(requests) == 0 {
 		slog.Warn("No valid images to process")
-		return nil
 	}
 
 	batchReq := &visionpb.BatchAnnotateImagesRequest{
@@ -86,17 +87,15 @@ func (v *VisionWrapper) ExtractTextFromImage(ImageUrlArrays []string, errHandler
 	resp, err := v.Vision.VisionClient.BatchAnnotateImages(v.Vision.VisionContext, batchReq)
 	// slog.Info("vision", slog.Any("response", resp))
 	if err != nil {
-		errHandler.Send(models.WorkerError{
+		scraper.Err.Send(models.WorkerError{
 			WorkerId: w,
 			Message:  "Error in vision API request",
 			Err:      err,
 		})
-		return nil
 	}
 
 	if resp == nil || len(resp.Responses) == 0 {
 		slog.Warn("No responses from vision API")
-		return nil
 	}
 
 	var resultsArray []string
@@ -107,13 +106,15 @@ func (v *VisionWrapper) ExtractTextFromImage(ImageUrlArrays []string, errHandler
 		}
 
 		if len(r.TextAnnotations) > 0 {
-			resultsArray = append(resultsArray, r.TextAnnotations[0].Description) // Uri:  validURLs[i],
-        }
+			v.Vision.NamesChan.NamesChan <- r.TextAnnotations[0].Description
+			resultsArray = append(resultsArray, r.TextAnnotations[0].Description)
+		}
 	}
-
+	if err := repository.BulkUpsertTestimonials(scraper.DbClient.GetDB(), seedCompanyId, resultsArray); err != nil {
+		slog.Error("error upserting testimonial images", slog.Any("error", err))
+	}
 	// saveFullResponseToJSON(resp, validURLs)
 
-	return resultsArray
 }
 
 func saveFullResponseToJSON(resp *visionpb.BatchAnnotateImagesResponse, urls []string) {

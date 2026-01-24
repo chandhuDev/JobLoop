@@ -15,6 +15,8 @@ import (
 	"github.com/playwright-community/playwright-go"
 )
 
+var searchEngineKey = os.Getenv("GOOGLE_SEARCH_ENGINE")
+
 type SeedCompanyService struct {
 	SeedCompany *models.SeedCompanyArray
 }
@@ -81,8 +83,6 @@ func (s *SeedCompanyService) GetSeedCompaniesFromPeerList(scraper *interfaces.Sc
 	}
 	defer page.Close()
 
-	searchEngineKey := os.Getenv("GOOGLE_SEARCH_ENGINE")
-	namesChan := make(chan string, 50)
 	slog.Info("START processing for peerlist", slog.Time("time", time.Now()))
 
 	if _, err := page.Goto(sp.URL, playwright.PageGotoOptions{
@@ -107,16 +107,11 @@ func (s *SeedCompanyService) GetSeedCompaniesFromPeerList(scraper *interfaces.Sc
 		return
 	}
 
-	slog.Info("Found nodes with selector in peerlist",
-		slog.Int("length", count),
-		slog.String("selector", sp.Selector),
-	)
+	slog.Info("Found nodes with selector in peerlist", slog.Int("length", count), slog.String("selector", sp.Selector))
 
 	go func() {
-		defer close(namesChan)
-
 		for i := 0; i < count && i < 3; i++ {
-			slog.Info("sending names to namesChan")
+			slog.Info("sending names to namesChan of peerlist")
 
 			item := locator.Nth(i)
 			pElement := item.Locator("div:first-child > p")
@@ -126,54 +121,11 @@ func (s *SeedCompanyService) GetSeedCompaniesFromPeerList(scraper *interfaces.Sc
 				slog.Error("error getting text", slog.Any("error", err))
 				continue
 			}
-
-			namesChan <- lastWord(urlText)
+			scraper.NamesChanClient.NamesChan <- urlText
 		}
 	}()
 
-	var searchWg sync.WaitGroup
-	workerCount := 3
-
-	for i := 0; i < workerCount; i++ {
-		searchWg.Add(1)
-		go func(workerID int) {
-			defer searchWg.Done()
-
-			for name := range namesChan {
-				slog.Info("starting goroutine for peerlist search scraper", slog.Int("id", workerID))
-
-				result, err := scraper.Search.SearchKeyWordInGoogle(
-					name, workerID, searchEngineKey,
-				)
-
-				if err != nil {
-					scraper.Err.Send(models.WorkerError{
-						WorkerId: workerID,
-						Message:  "error searching google",
-						Err:      err,
-					})
-					continue
-				}
-				scr := repository.CreateSeedCompanyRepository(name, result)
-				if err := repository.CreateSeedCompany(scr, scraper.DbClient.GetDB()); err != nil {
-					scraper.Err.Send(models.WorkerError{
-						WorkerId: workerID,
-						Message:  "error creating seed company in DB",
-						Err:      err,
-					})
-				}
-
-				slog.Info("company result", slog.String("url", result))
-				s.SeedCompany.ResultChan <- models.SeedCompanyResult{
-					CompanyName:   name,
-					CompanyURL:    result,
-					SeedCompanyId: scr.ID,
-				}
-			}
-		}(i)
-	}
-
-	searchWg.Wait()
+	s.UploadSeedCompanyToChannel(scraper)
 }
 
 func (s *SeedCompanyService) GetSeedCompaniesFromYCombinator(ctx context.Context, scraper *interfaces.ScraperClient, yc *models.SeedCompany) {
@@ -227,22 +179,19 @@ func (s *SeedCompanyService) GetSeedCompaniesFromYCombinator(ctx context.Context
 			url = ""
 		}
 
-		slog.Info("seed company Ycombinator",
-			slog.String("CompanyName", name),
-			slog.String("CompanyURL", url),
-		)
+		slog.Info("seed company Ycombinator", slog.String("CompanyName", name), slog.String("CompanyURL", url))
 
-		scr := repository.CreateSeedCompanyRepository(name, url)
-		if err := repository.CreateSeedCompany(scr, scraper.DbClient.GetDB()); err != nil {
-			slog.Error("error creating seed company at DB", slog.Any("error", err))
-		}
+		scrId := CreateSeedCompanyRepo(name, url, -1, *scraper)
+
+		go getJobResults(scraper.Browser, url)
 
 		s.SeedCompany.ResultChan <- models.SeedCompanyResult{
 			CompanyName:   name,
 			CompanyURL:    url,
-			SeedCompanyId: scr.ID,
+			SeedCompanyId: scrId,
 		}
 
+		//naviagte back to main page
 		if _, err := page.Goto(yc.URL, playwright.PageGotoOptions{
 			WaitUntil: playwright.WaitUntilStateDomcontentloaded,
 		}); err != nil {
@@ -260,6 +209,60 @@ func (s *SeedCompanyService) GetSeedCompaniesFromYCombinator(ctx context.Context
 			break
 		}
 	}
+}
+
+func (s *SeedCompanyService) UploadSeedCompanyToChannel(scraper *interfaces.ScraperClient) {
+	var searchWg sync.WaitGroup
+
+	workerCount := 3
+	for i := 0; i < workerCount; i++ {
+		searchWg.Add(1)
+		go func(workerID int) {
+			slog.Info("starting goroutine for search scraper in uploadSeedCompanyToChannel func by", slog.Int("id", workerID))
+			for name := range scraper.NamesChanClient.NamesChan {
+				result, err := scraper.Search.SearchKeyWordInGoogle(
+					name, workerID, searchEngineKey,
+				)
+				if err != nil {
+					scraper.Err.Send(models.WorkerError{
+						WorkerId: workerID,
+						Message:  "error searching google",
+						Err:      err,
+					})
+					continue
+				}
+
+				slog.Info("company url in peerlist", slog.String("url", result))
+
+				go getJobResults(scraper.Browser, result)
+
+				scrId := CreateSeedCompanyRepo(name, result, workerID, *scraper)
+				s.SeedCompany.ResultChan <- models.SeedCompanyResult{
+					CompanyName:   name,
+					CompanyURL:    result,
+					SeedCompanyId: scrId,
+				}
+			}
+		}(i)
+	}
+
+	searchWg.Wait()
+}
+
+func CreateSeedCompanyRepo(name string, url string, workerID int, scraper interfaces.ScraperClient) uint {
+	scr := repository.CreateSeedCompanyRepository(name, url)
+	if err := repository.CreateSeedCompany(scr, scraper.DbClient.GetDB()); err != nil {
+		scraper.Err.Send(models.WorkerError{
+			WorkerId: workerID,
+			Message:  "error creating seed company in DB",
+			Err:      err,
+		})
+	}
+	return scr.ID
+}
+
+func getJobResults(browser interfaces.BrowserClient, companyUrl string) {
+	ScrapeJobs(browser, companyUrl)
 }
 
 func lastWord(text string) string {

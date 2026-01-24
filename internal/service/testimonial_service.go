@@ -2,14 +2,12 @@ package service
 
 import (
 	"log/slog"
-	"os"
 	"strings"
 	"sync"
 	"time"
 
 	interfaces "github.com/chandhuDev/JobLoop/internal/interfaces"
 	models "github.com/chandhuDev/JobLoop/internal/models"
-	"github.com/chandhuDev/JobLoop/internal/repository"
 	"github.com/playwright-community/playwright-go"
 )
 
@@ -55,15 +53,12 @@ func (t *TestimonialService) ScrapeTestimonial(scraper *interfaces.ScraperClient
 					url = "https://" + url
 				}
 
-				_, err := page.Goto("https://www.sibros.tech/", playwright.PageGotoOptions{
+				_, err := page.Goto(url, playwright.PageGotoOptions{
 					WaitUntil: playwright.WaitUntilStateNetworkidle,
 					Timeout:   playwright.Float(60000),
 				})
 				if err != nil {
-					slog.Error("Navigation failed",
-						slog.String("company", scr.CompanyName),
-						slog.String("url", scr.CompanyURL),
-						slog.Any("error", err))
+					slog.Error("Navigation failed", slog.String("company", scr.CompanyName), slog.String("url", scr.CompanyURL), slog.Any("error", err))
 					scraper.Err.Send(models.WorkerError{
 						WorkerId: workerID,
 						Message:  "Error navigating to testimonial page",
@@ -75,12 +70,6 @@ func (t *TestimonialService) ScrapeTestimonial(scraper *interfaces.ScraperClient
 				locator := page.Locator(xpath)
 
 				count, err := locator.Count()
-				slog.Info("counting testimonial parent nodes", slog.String("company Name", scr.CompanyName))
-				slog.Info("counting testimonial parent nodes", slog.String("company Name", scr.CompanyName))
-				slog.Info("counting testimonial parent nodes", slog.String("company Name", scr.CompanyName))
-				slog.Info("counting testimonial parent nodes", slog.String("company Name", scr.CompanyName))
-				slog.Info("counting testimonial parent nodes", slog.String("company Name", scr.CompanyName))
-
 				slog.Info("count of testimonial nodes", slog.Int("count", count))
 				if err != nil || count == 0 {
 					slog.Info("No testimonial images found for", slog.String("company Name", scr.CompanyName))
@@ -162,7 +151,6 @@ func (t *TestimonialService) ScrapeTestimonial(scraper *interfaces.ScraperClient
 				}
 
 				if len(urlArray) > 0 {
-
 					t.Testimonial.ImageResultChan <- urlArray
 				}
 
@@ -176,36 +164,8 @@ func (t *TestimonialService) ScrapeTestimonial(scraper *interfaces.ScraperClient
 
 			for urlArray := range t.Testimonial.ImageResultChan {
 				slog.Info("Processing images", slog.Int("worker_id", workerID), slog.Int("url_count", len(urlArray)))
-				VisionResultArray := vision.ExtractTextFromImage(urlArray, scraper.Err, workerID)
-				if err := repository.BulkUpsertTestimonials(scraper.DbClient.GetDB(), t.Testimonial.SeedCompanyId, VisionResultArray); err != nil {
-					slog.Error("error upserting testimonial images", slog.Any("error", err))
-				}
-				searchEngineKey := os.Getenv("GOOGLE_SEARCH_ENGINE")
 
-				for _, name := range VisionResultArray {
-					slog.Info("starting goroutine for peerlist search scraper", slog.Int("id", workerID))
-
-					result, err := scraper.Search.SearchKeyWordInGoogle(
-						name, workerID, searchEngineKey,
-					)
-
-					if err != nil {
-						scraper.Err.Send(models.WorkerError{
-							WorkerId: workerID,
-							Message:  "error searching google",
-							Err:      err,
-						})
-						continue
-					}
-					scr := repository.CreateSeedCompanyRepository(name, result)
-					if err := repository.CreateSeedCompany(scr, scraper.DbClient.GetDB()); err != nil {
-						scraper.Err.Send(models.WorkerError{
-							WorkerId: workerID,
-							Message:  "error creating seed company in DB",
-							Err:      err,
-						})
-					}
-				}
+				vision.ExtractTextFromImage(urlArray, scraper, workerID,t.Testimonial.SeedCompanyId)
 			}
 		}(i)
 	}

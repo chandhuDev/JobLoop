@@ -8,4 +8,5 @@ import (
 type Vision struct {
 	VisionClient *vision.ImageAnnotatorClient
     VisionContext context.Context
+	NamesChan *NamesClient
 }
