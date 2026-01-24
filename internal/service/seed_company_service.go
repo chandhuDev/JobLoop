@@ -121,7 +121,7 @@ func (s *SeedCompanyService) GetSeedCompaniesFromPeerList(scraper *interfaces.Sc
 				slog.Error("error getting text", slog.Any("error", err))
 				continue
 			}
-			scraper.NamesChanClient.NamesChan <- urlText
+			scraper.NamesChanClient.NamesChan <- LastWord(urlText)
 		}
 	}()
 
@@ -234,9 +234,11 @@ func (s *SeedCompanyService) UploadSeedCompanyToChannel(scraper *interfaces.Scra
 
 				slog.Info("company url in peerlist", slog.String("url", result))
 
-				go getJobResults(scraper.Browser, result)
-
 				scrId := CreateSeedCompanyRepo(name, result, workerID, *scraper)
+				go func() {
+					scrapedJobResults, _ := getJobResults(scraper.Browser, result)
+					repository.UpsertJob(scraper.DbClient.GetDB(), scrId, scrapedJobResults)
+				}()
 				s.SeedCompany.ResultChan <- models.SeedCompanyResult{
 					CompanyName:   name,
 					CompanyURL:    result,
@@ -261,11 +263,11 @@ func CreateSeedCompanyRepo(name string, url string, workerID int, scraper interf
 	return scr.ID
 }
 
-func getJobResults(browser interfaces.BrowserClient, companyUrl string) {
-	ScrapeJobs(browser, companyUrl)
+func getJobResults(browser interfaces.BrowserClient, companyUrl string) ([]models.LinkData, error) {
+	return ScrapeJobs(browser, companyUrl)
 }
 
-func lastWord(text string) string {
+func LastWord(text string) string {
 	re := regexp.MustCompile(`\d+[hdwm]\s*ago`)
 	text = re.ReplaceAllString(text, "")
 	text = strings.TrimSpace(text)

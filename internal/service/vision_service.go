@@ -106,10 +106,16 @@ func (v *VisionWrapper) ExtractTextFromImage(ImageUrlArrays []string, scraper *i
 		}
 
 		if len(r.TextAnnotations) > 0 {
-			v.Vision.NamesChan.NamesChan <- r.TextAnnotations[0].Description
 			resultsArray = append(resultsArray, r.TextAnnotations[0].Description)
 		}
 	}
+
+	go func(results []string) {
+		for _, text := range results {
+			v.Vision.NamesChan.NamesChan <- LastWord(text)
+		}
+	}(resultsArray)
+
 	if err := repository.BulkUpsertTestimonials(scraper.DbClient.GetDB(), seedCompanyId, resultsArray); err != nil {
 		slog.Error("error upserting testimonial images", slog.Any("error", err))
 	}

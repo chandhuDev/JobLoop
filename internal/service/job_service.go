@@ -8,13 +8,9 @@ import (
 	"strings"
 
 	"github.com/chandhuDev/JobLoop/internal/interfaces"
+	models "github.com/chandhuDev/JobLoop/internal/models"
 	"github.com/playwright-community/playwright-go"
 )
-
-type LinkData struct {
-	URL  string
-	Text string
-}
 
 var (
 	socialDomains = map[string]bool{
@@ -60,7 +56,7 @@ var (
 	}
 )
 
-func ScrapeJobs(browser interfaces.BrowserClient, companyUrl string) ([]LinkData, error) {
+func ScrapeJobs(browser interfaces.BrowserClient, companyUrl string) ([]models.LinkData, error) {
 	// var companyUrl = strings.TrimSpace("https://www.mux.com/")
 
 	page, err := browser.RunInNewTab()
@@ -349,7 +345,7 @@ func checkForJobsLink(page playwright.Page, currentUrl string) string {
 	return currentUrl
 }
 
-func extractAllLinks(page playwright.Page, baseUrl string) ([]LinkData, error) {
+func extractAllLinks(page playwright.Page, baseUrl string) ([]models.LinkData, error) {
 	extractHiddenLinks(page)
 
 	script := `
@@ -364,7 +360,7 @@ func extractAllLinks(page playwright.Page, baseUrl string) ([]LinkData, error) {
 		return nil, fmt.Errorf("failed to extract links: %w", err)
 	}
 
-	links := []LinkData{}
+	links := []models.LinkData{}
 	seen := make(map[string]bool)
 
 	if items, ok := result.([]interface{}); ok {
@@ -388,7 +384,7 @@ func extractAllLinks(page playwright.Page, baseUrl string) ([]LinkData, error) {
 				}
 
 				seen[resolved] = true
-				links = append(links, LinkData{
+				links = append(links, models.LinkData{
 					URL:  resolved,
 					Text: cleanedText,
 				})
@@ -407,8 +403,8 @@ func extractAllLinks(page playwright.Page, baseUrl string) ([]LinkData, error) {
 	return links, nil
 }
 
-func extractLinksFromIframes(page playwright.Page, baseUrl string) []LinkData {
-	links := []LinkData{}
+func extractLinksFromIframes(page playwright.Page, baseUrl string) []models.LinkData {
+	links := []models.LinkData{}
 
 	iframes := page.Locator("iframe")
 	count, err := iframes.Count()
@@ -469,7 +465,7 @@ func extractLinksFromIframes(page playwright.Page, baseUrl string) []LinkData {
 				continue
 			}
 
-			links = append(links, LinkData{
+			links = append(links, models.LinkData{
 				URL:  resolved,
 				Text: cleanedText,
 			})
@@ -504,8 +500,8 @@ func isJobBoardIframe(src string) bool {
 	return false
 }
 
-func filterLinks(links []LinkData) []LinkData {
-	filtered := []LinkData{}
+func filterLinks(links []models.LinkData) []models.LinkData {
+	filtered := []models.LinkData{}
 
 	for _, link := range links {
 		if passesURLFilters(link.URL) {
@@ -552,8 +548,8 @@ func passesURLFilters(link string) bool {
 	return true
 }
 
-func filterByJobScore(links []LinkData) []LinkData {
-	jobLinks := []LinkData{}
+func filterByJobScore(links []models.LinkData) []models.LinkData {
+	jobLinks := []models.LinkData{}
 
 	for _, link := range links {
 		score := calculateJobScore(link.URL, link.Text)

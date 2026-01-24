@@ -34,6 +34,7 @@ type Job struct {
 
 	SeedCompanyID uint   `gorm:"not null;uniqueIndex:uniq_job_index"`
 	JobTitle      string `gorm:"type:citext;not null;uniqueIndex:uniq_job_index"`
+	JobUrl        string `gorm:"not null"`
 
 	CreatedAt time.Time
 }
