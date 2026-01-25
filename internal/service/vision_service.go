@@ -96,6 +96,7 @@ func (v *VisionWrapper) ExtractTextFromImage(ImageUrlArrays []string, scraper *i
 
 	if resp == nil || len(resp.Responses) == 0 {
 		slog.Warn("No responses from vision API")
+		return
 	}
 
 	var resultsArray []string

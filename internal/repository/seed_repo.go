@@ -8,8 +8,8 @@ import (
 	"gorm.io/gorm"
 )
 
-func CreateSeedCompanyRepository(scn string, scu string) schema.SeedCompany {
-	return schema.SeedCompany{
+func CreateSeedCompanyRepository(scn string, scu string) *schema.SeedCompany {
+	return &schema.SeedCompany{
 		CompanyName: scn,
 		CompanyURL:  scu,
 		Visited:     true,
@@ -33,11 +33,27 @@ func UpdateSeedCompanyData(scid uint, DB *gorm.DB, flags map[string]interface{},
 		Error
 }
 
-func CreateSeedCompany(seedCompany schema.SeedCompany, DB *gorm.DB) error {
-	result := DB.Create(&seedCompany)
-	if result.Error != nil {
-		return result.Error
+func CreateSeedCompany(seedCompany *schema.SeedCompany, DB *gorm.DB) error {
+	var existing schema.SeedCompany
+	existingResult := DB.Where("company_url = ?", seedCompany.CompanyURL).First(&existing)
+
+	if existingResult.Error == nil {
+		// Exists - update and return existing ID
+		seedCompany.ID = existing.ID
+		return DB.Model(&existing).Updates(map[string]interface{}{
+			"visited":      seedCompany.Visited,
+			"company_name": seedCompany.CompanyName,
+		}).Error
 	}
-	slog.Info("Seed company created successfully", slog.String("CompanyName", seedCompany.CompanyName))
+
+	// Doesn't exist - create new
+	newRecordResult := DB.Create(seedCompany)
+	if newRecordResult.Error != nil {
+		return newRecordResult.Error
+	}
+	if seedCompany.ID == 0 {
+		slog.Error("failed to create seed company, ID is zero", slog.String("company_url", seedCompany.CompanyURL))
+		return fmt.Errorf("failed to create seed company, ID is zero")
+	}
 	return nil
 }

@@ -10,6 +10,6 @@ type ScraperClient struct {
 	Search          SearchClient
 	Vision          *vision.ImageAnnotatorClient
 	Err             ErrorClient
-	DbClient        DatabaseClient
+	 DbClient        DatabaseClient
 	NamesChanClient *models.NamesClient
 }

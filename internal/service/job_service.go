@@ -554,7 +554,7 @@ func filterByJobScore(links []models.LinkData) []models.LinkData {
 	for _, link := range links {
 		score := calculateJobScore(link.URL, link.Text)
 		if score >= 2 {
-			slog.Info("Job Link Found", slog.String("url", link.URL), slog.String("text", link.Text))
+			// slog.Info("Job Link Found", slog.String("url", link.URL), slog.String("text", link.Text))
 			jobLinks = append(jobLinks, link)
 		}
 	}

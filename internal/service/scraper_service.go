@@ -6,7 +6,9 @@ import (
 	"github.com/chandhuDev/JobLoop/internal/models"
 )
 
-func SetUpScraperClient(browser interfaces.BrowserClient, vision *vision.ImageAnnotatorClient, search interfaces.SearchClient, err interfaces.ErrorClient, dbClient interfaces.DatabaseClient, namesChannel *models.NamesClient) *interfaces.ScraperClient {
+func SetUpScraperClient(browser interfaces.BrowserClient,
+	vision *vision.ImageAnnotatorClient, search interfaces.SearchClient, err interfaces.ErrorClient, dbClient interfaces.DatabaseClient, namesChannel *models.NamesClient,
+) *interfaces.ScraperClient {
 	return &interfaces.ScraperClient{
 		Browser:         browser,
 		Vision:          vision,

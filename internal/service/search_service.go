@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
 
@@ -29,10 +30,27 @@ func CreateSearchService(context context.Context) (*customsearch.Service, error)
 }
 
 func (s *SearchService) SearchKeyWordInGoogle(name string, i int, key string) (string, error) {
-	// slog.Info("search scraper url anme", slog.String("url name", name), slog.Int("from worker id", i))
+	if s.Search == nil || s.Search.SearchClient == nil {
+		return "", fmt.Errorf("search client not initialized")
+	}
+
+	if key == "" {
+		return "", fmt.Errorf("search engine key is empty")
+	}
+
 	v, err := s.Search.SearchClient.Cse.List().Q(name).Cx(key).Do()
-	slog.Info("search results",
-		slog.Any("url", v.Items[0].DisplayLink),
-	)
-	return v.Items[0].DisplayLink, err
+	if err != nil {
+		slog.Error("search API error", slog.Any("error", err), slog.String("name", name))
+		return "", err
+	}
+
+	if v == nil || len(v.Items) == 0 {
+		slog.Warn("no search results found", slog.String("name", name))
+		return "", fmt.Errorf("no results found for %s", name)
+	}
+
+	url := v.Items[0].DisplayLink
+	slog.Info("search results", slog.String("url", url), slog.Int("workerId", i))
+
+	return url, nil
 }
