@@ -75,6 +75,7 @@ func main() {
 	search := &service.SearchService{Search: searchConfig}
 
 	namesChannel := service.CreateNamesChannel(200)
+	defer namesChannel.CloseNamesChan()
 
 	visionInstance, err := service.CreateVisionInstance(ctx)
 	if err != nil {

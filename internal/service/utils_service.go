@@ -18,3 +18,7 @@ func CreateNamesChannel(bufferSize int) *UtilsService {
 func (u *UtilsService) ReturnNamesChan() *models.NamesClient {
 	return u.NamesChan
 }
+
+func (u *UtilsService) CloseNamesChan() {
+	close(u.NamesChan.NamesChan)
+}
