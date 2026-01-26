@@ -33,7 +33,7 @@ func NewSeedCompanyArray(firstSeedCompany models.SeedCompany, secondSeedCompany 
 		Companies:  []models.SeedCompany{firstSeedCompany, secondSeedCompany},
 		PWg:        &sync.WaitGroup{},
 		YCWg:       &sync.WaitGroup{},
-		ResultChan: make(chan models.SeedCompanyResult, 100),
+		ResultChan: make(chan models.SeedCompanyResult, 500),
 	}
 }
 

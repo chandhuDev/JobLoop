@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"sync"
+	"time"
 
 	"github.com/chandhuDev/JobLoop/internal/interfaces"
 	models "github.com/chandhuDev/JobLoop/internal/models"
@@ -37,7 +38,7 @@ func CreateVisionInstance(context context.Context) (*vision.ImageAnnotatorClient
 }
 
 func (v *VisionWrapper) ExtractTextFromImage(ImageUrlArrays []string, scraper *interfaces.ScraperClient, w int, seedCompanyId uint) {
-	slog.Info("we are starting vision scraper")
+	slog.Info("we are starting vision scraper", slog.Int("worker_id", w), slog.Int("image_count", len(ImageUrlArrays)))
 
 	var requests []*visionpb.AnnotateImageRequest
 	var validURLs []string
@@ -84,7 +85,11 @@ func (v *VisionWrapper) ExtractTextFromImage(ImageUrlArrays []string, scraper *i
 		Requests: requests,
 	}
 
-	resp, err := v.Vision.VisionClient.BatchAnnotateImages(v.Vision.VisionContext, batchReq)
+	// Create context with timeout for Vision API
+	ctx, cancel := context.WithTimeout(v.Vision.VisionContext, 30*time.Second)
+	defer cancel()
+
+	resp, err := v.Vision.VisionClient.BatchAnnotateImages(ctx, batchReq)
 	// slog.Info("vision", slog.Any("response", resp))
 	if err != nil {
 		scraper.Err.Send(models.WorkerError{
@@ -122,6 +127,10 @@ func (v *VisionWrapper) ExtractTextFromImage(ImageUrlArrays []string, scraper *i
 	}
 	// saveFullResponseToJSON(resp, validURLs)
 
+	slog.Info("vision processing completed", slog.Int("worker_id", w), slog.Int("results", len(resultsArray)))
+
+	// Add small delay to avoid overwhelming Vision API
+	time.Sleep(2 * time.Second)
 }
 
 func saveFullResponseToJSON(resp *visionpb.BatchAnnotateImagesResponse, urls []string) {

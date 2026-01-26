@@ -18,14 +18,14 @@ type TestimonialService struct {
 
 func NewTestimonial() *models.Testimonial {
 	return &models.Testimonial{
-		ImageResultChan: make(chan []string, 100),
+		ImageResultChan: make(chan []string, 500),
 		TestimonialWg:   &sync.WaitGroup{},
 		ImageWg:         &sync.WaitGroup{},
 	}
 }
 
 func (t *TestimonialService) ScrapeTestimonial(scraper *interfaces.ScraperClient, scChan <-chan models.SeedCompanyResult, vision VisionWrapper) {
-	for i := 0; i < 6; i++ {
+	for i := 0; i < 2; i++ {
 		t.Testimonial.TestimonialWg.Add(1)
 
 		go func(workerID int) {
@@ -107,7 +107,11 @@ func (t *TestimonialService) ScrapeTestimonial(scraper *interfaces.ScraperClient
 				}
 
 				var urlArray []string
-				for _, img := range images {
+				maxImages := 10 // Limit to 10 images per company to avoid overwhelming Vision API
+				for i, img := range images {
+					if i >= maxImages {
+						break
+					}
 					if src, ok := img.(string); ok && src != "" {
 						fullURL := toAbsoluteURL(url, src)
 						if fullURL != "" {
@@ -117,15 +121,16 @@ func (t *TestimonialService) ScrapeTestimonial(scraper *interfaces.ScraperClient
 				}
 
 				if len(urlArray) > 0 {
-					slog.Info("Found testimonial images", slog.Int("count", len(urlArray)))
+					slog.Info("Found testimonial images", slog.String("company", scr.CompanyName), slog.Int("count", len(urlArray)))
 					t.Testimonial.ImageResultChan <- urlArray
 				} else {
-					slog.Warn("No valid image URLs found")
+					slog.Warn("No valid image URLs found", slog.String("company", scr.CompanyName))
 				}
 
 			}
 		}(i)
 	}
+	
 	for i := 0; i < 2; i++ {
 		t.Testimonial.ImageWg.Add(1)
 		go func(workerID int) {
