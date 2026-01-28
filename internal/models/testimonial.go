@@ -7,9 +7,14 @@ import (
 type Testimonial struct {
 	TestimonialWg   *sync.WaitGroup
 	ImageWg         *sync.WaitGroup
-	ImageResultChan chan []string
+	ImageResultChan chan TestimonialImageResult
 	Err             ErrorHandler
-	SeedCompanyId   uint
+}
+
+type TestimonialImageResult struct {
+	SeedCompanyId uint
+	CompanyName   string
+	URL           []string
 }
 
 type TestimonialResult struct {

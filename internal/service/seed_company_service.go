@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/chandhuDev/JobLoop/internal/interfaces"
@@ -42,6 +43,12 @@ func (s *SeedCompanyService) SeedCompanyConfigs(ctx context.Context, scraper *in
 	defer close(s.SeedCompany.ResultChan)
 
 	for i := 0; i < len(s.SeedCompany.Companies); i++ {
+		select {
+		case <-ctx.Done():
+			slog.Info("SeedCompany stopping (context cancelled)")
+			return
+		default:
+		}
 		if s.SeedCompany.Companies[i].Name == "Peer list" {
 			s.SeedCompany.PWg.Add(1)
 			go func(sp models.SeedCompany) {
@@ -124,6 +131,9 @@ func (s *SeedCompanyService) GetSeedCompaniesFromPeerList(scraper *interfaces.Sc
 func (s *SeedCompanyService) GetSeedCompaniesFromYCombinator(ctx context.Context, scraper *interfaces.ScraperClient, yc *models.SeedCompany) {
 	slog.Info("worker started for ycombinator")
 
+	const maxCompanies = 50
+	var processedCount atomic.Int32
+
 	page, err := scraper.Browser.RunInNewTab()
 	if err != nil {
 		slog.Error("error creating page for ycombinator", slog.Any("error", err))
@@ -147,6 +157,11 @@ func (s *SeedCompanyService) GetSeedCompaniesFromYCombinator(ctx context.Context
 	slog.Info("Found companies", slog.Int("count", count))
 
 	for i := 0; i < count; i++ {
+		// Check if we've reached the limit
+		if processedCount.Load() >= maxCompanies {
+			slog.Info("Reached maximum company limit, stopping YCombinator scraping", slog.Int("processed", int(processedCount.Load())))
+			break
+		}
 		// if i >= count {
 		// 	slog.Warn("Not enough nodes in Ycombinator", slog.Int("have", count), slog.Int("need", i))
 		// 	break
@@ -154,12 +169,13 @@ func (s *SeedCompanyService) GetSeedCompaniesFromYCombinator(ctx context.Context
 
 		item := locator.Nth(i)
 
-		name, err := item.TextContent()
+		nameLocator := item.Locator("span").First()
+		name, err := nameLocator.TextContent()
 		if err != nil {
-			slog.Error("error getting at YC", slog.Any("error", err))
+			slog.Error("error getting name at YC", slog.Any("error", err))
 			continue
 		}
-
+		name = strings.TrimSpace(name)
 		if err := item.Click(); err != nil {
 			slog.Error("error clicking item at YC", slog.Any("error", err))
 			continue
@@ -174,18 +190,24 @@ func (s *SeedCompanyService) GetSeedCompaniesFromYCombinator(ctx context.Context
 
 		slog.Info("seed company Ycombinator", slog.String("CompanyName", name), slog.String("CompanyURL", url))
 
+		// Increment counter
+		processedCount.Add(1)
+
 		scrId := CreateSeedCompanyRepo(name, url, -1, *scraper)
 
 		done := make(chan struct{})
 		go func(companyUrl string, seedId uint, companyName string) {
 			<-done
 			scrapedJobResults, err := getJobResults(scraper.Browser, companyUrl)
+
 			if err != nil {
-				slog.Error("error scraping jobs", slog.String("url", companyUrl), slog.Any("error", err))
+				slog.Error("❌ FAILED to scrape jobs (likely no careers page)", slog.String("company", companyName), slog.String("url", companyUrl), slog.Any("error", err))
 				return
 			}
 			repository.UpsertJob(scraper.DbClient.GetDB(), seedId, scrapedJobResults)
-			slog.Info("upserted jobs for seed company", slog.String("company", companyName), slog.Int("job_count", len(scrapedJobResults)))
+
+			slog.Info("✅ SUCCESS: Upserted jobs", slog.String("company", companyName), slog.Int("job_count", len(scrapedJobResults)))
+
 		}(url, scrId, name)
 
 		s.SeedCompany.ResultChan <- models.SeedCompanyResult{
@@ -195,7 +217,7 @@ func (s *SeedCompanyService) GetSeedCompaniesFromYCombinator(ctx context.Context
 		}
 		time.Sleep(5 * time.Second)
 
-		done <- struct{}{}
+		 done <- struct{}{}
 
 		//naviagte back to main page
 		if _, err := page.Goto(yc.URL, playwright.PageGotoOptions{
@@ -221,18 +243,26 @@ func (s *SeedCompanyService) UploadSeedCompanyToChannel(scraper *interfaces.Scra
 	var searchWg sync.WaitGroup
 	var searchEngineKey = os.Getenv("GOOGLE_SEARCH_ENGINE")
 
+	const maxCompanies = 10
+	var processedCount atomic.Int32
+
 	if searchEngineKey == "" {
 		slog.Error("searchEngineKey is empty, skipping search")
 		return
 	}
 
-	workerCount := 3
+	workerCount := 2
 	for i := 0; i < workerCount; i++ {
 		searchWg.Add(1)
 		go func(workerID int) {
 			defer searchWg.Done()
 			slog.Info("starting goroutine for search scraper in uploadSeedCompanyToChannel func by", slog.Int("id", workerID))
 			for name := range scraper.NamesChanClient.NamesChan {
+				// Check if we've reached the limit
+				if processedCount.Load() >= maxCompanies {
+					slog.Info("Reached maximum company limit, stopping PeerList processing", slog.Int("worker", workerID), slog.Int("processed", int(processedCount.Load())))
+					return
+				}
 				if scraper.Search == nil {
 					slog.Error("Search client is nil")
 					continue
@@ -258,6 +288,9 @@ func (s *SeedCompanyService) UploadSeedCompanyToChannel(scraper *interfaces.Scra
 
 				slog.Info("company url in peerlist", slog.String("url", result))
 
+				// Increment counter
+				processedCount.Add(1)
+
 				scrId := CreateSeedCompanyRepo(name, result, workerID, *scraper)
 
 				done := make(chan struct{})
@@ -265,14 +298,14 @@ func (s *SeedCompanyService) UploadSeedCompanyToChannel(scraper *interfaces.Scra
 					<-done
 					scrapedJobResults, err := getJobResults(scraper.Browser, url)
 					if err != nil {
-						slog.Error("error scraping jobs", slog.Any("error", err))
+						slog.Error("❌ FAILED to scrape jobs (likely no careers page)", slog.String("company", companyName), slog.String("url", url), slog.Any("error", err))
 						return
 					}
 					repository.UpsertJob(scraper.DbClient.GetDB(), id, scrapedJobResults)
-					slog.Info("upserted jobs", slog.String("company", companyName), slog.Int("count", len(scrapedJobResults)))
+					slog.Info("✅ SUCCESS: Upserted jobs", slog.String("company", companyName), slog.Int("job_count", len(scrapedJobResults)))
 				}(scrId, result, name)
 
-				time.Sleep(5*time.Second)
+				time.Sleep(5 * time.Second)
 				s.SeedCompany.ResultChan <- models.SeedCompanyResult{
 					CompanyName:   name,
 					CompanyURL:    result,

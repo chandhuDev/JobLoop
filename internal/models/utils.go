@@ -5,6 +5,7 @@ type NamesClient struct {
 }
 
 type LinkData struct {
-	URL  string
-	Text string
+	URL   string
+	Text  string
+	XPath string
 }

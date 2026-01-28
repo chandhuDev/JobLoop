@@ -49,9 +49,8 @@ func (v *VisionWrapper) ExtractTextFromImage(ImageUrlArrays []string, scraper *i
 	// 	testURL,
 	// }
 	for _, imageURL := range ImageUrlArrays {
+        imageBytes, err := downloadImage(imageURL)
 		slog.Info("successfully read bytes from image", slog.String("url", imageURL))
-
-		imageBytes, err := downloadImage(imageURL)
 		if err != nil {
 			slog.Warn("Failed to download image",
 				slog.String("url", imageURL),
@@ -75,62 +74,53 @@ func (v *VisionWrapper) ExtractTextFromImage(ImageUrlArrays []string, scraper *i
 
 		requests = append(requests, req)
 		validURLs = append(validURLs, imageURL)
-	}
 
-	if len(requests) == 0 {
-		slog.Warn("No valid images to process")
-	}
-
-	batchReq := &visionpb.BatchAnnotateImagesRequest{
-		Requests: requests,
-	}
-
-	// Create context with timeout for Vision API
-	ctx, cancel := context.WithTimeout(v.Vision.VisionContext, 30*time.Second)
-	defer cancel()
-
-	resp, err := v.Vision.VisionClient.BatchAnnotateImages(ctx, batchReq)
-	// slog.Info("vision", slog.Any("response", resp))
-	if err != nil {
-		scraper.Err.Send(models.WorkerError{
-			WorkerId: w,
-			Message:  "Error in vision API request",
-			Err:      err,
-		})
-	}
-
-	if resp == nil || len(resp.Responses) == 0 {
-		slog.Warn("No responses from vision API")
-		return
-	}
-
-	var resultsArray []string
-	for _, r := range resp.Responses {
-		if r.Error != nil {
-			slog.Error("Vision error", slog.String("msg", r.Error.Message))
-			continue
+		if len(requests) == 0 {
+			slog.Warn("No valid images to process")
 		}
 
-		if len(r.TextAnnotations) > 0 {
-			resultsArray = append(resultsArray, r.TextAnnotations[0].Description)
+		batchReq := &visionpb.BatchAnnotateImagesRequest{
+			Requests: requests,
 		}
+		// Create context with timeout for Vision API
+		ctx, cancel := context.WithTimeout(v.Vision.VisionContext, 10*time.Second)
+		defer cancel()
+
+		resp, err := v.Vision.VisionClient.BatchAnnotateImages(ctx, batchReq)
+		if err != nil {
+			scraper.Err.Send(models.WorkerError{
+				WorkerId: w,
+				Message:  "Error in vision API request",
+				Err:      err,
+			})
+		}
+		if resp == nil || len(resp.Responses) == 0 {
+			slog.Warn("No responses from vision API")
+			return
+		}
+		var resultsArray []string
+		for _, r := range resp.Responses {
+			if r.Error != nil {
+				slog.Error("Vision error", slog.String("msg", r.Error.Message))
+				continue
+			}
+
+			if len(r.TextAnnotations) > 0 {
+				resultsArray = append(resultsArray, r.TextAnnotations[0].Description)
+			}
+		}
+		go func(results []string) {
+			for _, text := range results {
+				v.Vision.NamesChan.NamesChan <- LastWord(text)
+			}
+		}(resultsArray)
+		
+		if err := repository.BulkUpsertTestimonials(scraper.DbClient.GetDB(), seedCompanyId, resultsArray); err != nil {
+			slog.Error("error upserting testimonial images", slog.Any("error", err))
+		}
+		slog.Info("vision processing completed", slog.Int("worker_id", w), slog.Int("results", len(resultsArray)))
 	}
 
-	go func(results []string) {
-		for _, text := range results {
-			v.Vision.NamesChan.NamesChan <- LastWord(text)
-		}
-	}(resultsArray)
-
-	if err := repository.BulkUpsertTestimonials(scraper.DbClient.GetDB(), seedCompanyId, resultsArray); err != nil {
-		slog.Error("error upserting testimonial images", slog.Any("error", err))
-	}
-	// saveFullResponseToJSON(resp, validURLs)
-
-	slog.Info("vision processing completed", slog.Int("worker_id", w), slog.Int("results", len(resultsArray)))
-
-	// Add small delay to avoid overwhelming Vision API
-	time.Sleep(2 * time.Second)
 }
 
 func saveFullResponseToJSON(resp *visionpb.BatchAnnotateImagesResponse, urls []string) {

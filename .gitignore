@@ -2,3 +2,7 @@ bin/
 tests/
 .env
 .env.*
+
+docker-compose.yaml
+dockerfile
+credentials/

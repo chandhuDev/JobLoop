@@ -1,9 +1,8 @@
 package models
 
 import (
-	"time"
-
 	"sync"
+	"time"
 )
 
 type SeedCompany struct {
@@ -20,9 +19,9 @@ type SeedCompanyResult struct {
 }
 
 type SeedCompanyArray struct {
-	Companies  []SeedCompany
-	PWg        *sync.WaitGroup
-	YCWg       *sync.WaitGroup
-	ResultChan chan SeedCompanyResult
-	Err        ErrorHandler
+	Companies   []SeedCompany
+	PWg         *sync.WaitGroup
+	YCWg        *sync.WaitGroup
+	ResultChan  chan SeedCompanyResult
+	Err         ErrorHandler
 }

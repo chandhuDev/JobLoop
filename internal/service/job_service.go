@@ -4,839 +4,466 @@ import (
 	"fmt"
 	"log/slog"
 	"net/url"
-	"regexp"
 	"strings"
+	"time"
+
+	"github.com/playwright-community/playwright-go"
 
 	"github.com/chandhuDev/JobLoop/internal/interfaces"
-	models "github.com/chandhuDev/JobLoop/internal/models"
-	"github.com/playwright-community/playwright-go"
+	"github.com/chandhuDev/JobLoop/internal/models"
 )
+
+/* ================= CONFIG ================= */
 
 var (
-	socialDomains = map[string]bool{
-		"facebook.com":  true,
-		"twitter.com":   true,
-		"x.com":         true,
-		"linkedin.com":  true,
-		"instagram.com": true,
-		"youtube.com":   true,
-		"tiktok.com":    true,
-		"github.com":    true,
-		"pinterest.com": true,
-		"reddit.com":    true,
-		"discord.com":   true,
-		"medium.com":    true,
-		"whatsapp.com":  true,
-		"telegram.org":  true,
+	careerKeywords = []string{"careers", "jobs"}
+
+	ctaKeywords = []string{
+		"view all", "view jobs", "view openings", "browse jobs", "browse openings", "view roles", "view positions", "open positions", "see openings", "see jobs", "search jobs", "explore open roles", "explore jobs", "join us", "see all jobs", "see our open roles",
 	}
 
-	assetExtensions = []string{
-		".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".ico",
-		".pdf", ".doc", ".docx", ".zip", ".mp4", ".mp3",
-		".css", ".js", ".woff", ".woff2", ".ttf",
+	jobKeywords = []string{
+		"senior", "lead", "engineer", "experience", "sales",
+		"platform", "head", "product", "manager", "principal",
+		"strategy", "solutions", "partner", "employee", "finance",
+		"account", "executive", "consultant", "sr.", "strategic", "operations", "acquisition", "business", "analyst", "customer",
 	}
 
-	noisePatterns = []string{
-		"javascript:", "mailto:", "tel:", "sms:",
-		"/cdn-cgi/", "/static/", "/assets/", "/images/", "/img/",
-		"/fonts/", "/css/", "/js/", "/media/",
-		"privacy", "terms", "cookie", "legal", "policy",
-		"login", "signin", "signup", "register", "auth",
-		"contact", "about-us", "blog", "news", "press",
-		"faq", "help", "support",
-	}
-
-	excludeSelectors = []string{
-		"header", "footer", "nav", "aside",
-		"[role='navigation']", "[role='banner']", "[role='contentinfo']",
-		".header", ".footer", ".nav", ".navbar", ".menu", ".sidebar", ".social",
-		"#header", "#footer", "#nav", "#menu", "#sidebar",
-		".cookie-banner", ".newsletter", ".subscribe",
-		".social-links", ".social-icons",
-	}
+	jobWaitTimeout = 3 * time.Second
 )
 
-func ScrapeJobs(browser interfaces.BrowserClient, companyUrl string) ([]models.LinkData, error) {
-	// var companyUrl = strings.TrimSpace("https://www.mux.com/")
+/* ================= MAIN ================= */
+
+func ScrapeJobs(browser interfaces.BrowserClient, companyURL string) ([]models.LinkData, error) {
+	if browser == nil {
+		return nil, fmt.Errorf("browser is nil")
+	}
 
 	page, err := browser.RunInNewTab()
 	if err != nil {
-		slog.Error("Error creating new page", slog.String("of", companyUrl), slog.Any("is", err))
-		return nil, err
+		return nil, fmt.Errorf("failed to create new tab: %w", err)
+	}
+	if page == nil {
+		return nil, fmt.Errorf("page is nil")
 	}
 	defer page.Close()
 
-	careersUrl, err := navigateToCareersPage(page, companyUrl)
+	baseURL, err := url.Parse(companyURL)
 	if err != nil {
-		slog.Error("Error finding careers page", slog.String("of", companyUrl), slog.Any("is", err))
-		return nil, err
+		return nil, fmt.Errorf("invalid company URL: %w", err)
 	}
 
-	err = page.WaitForLoadState(playwright.PageWaitForLoadStateOptions{
-		State:   playwright.LoadStateNetworkidle,
-		Timeout: playwright.Float(30000),
-	})
-	if err != nil {
-		slog.Warn("Timeout waiting for networkidle, continuing anyway", slog.String("url", careersUrl))
-	}
+	fmt.Println("🏠 Homepage:", companyURL)
 
-	careersUrl = checkForJobsLink(page, careersUrl)
-
-	page.WaitForTimeout(3000)
-
-	slog.Info("Ready to scrape jobs", slog.String("url", careersUrl))
-
-	removeNoisySections(page)
-
-	links, err := extractAllLinks(page, careersUrl)
-	if err != nil {
-		slog.Error("Error extracting links", slog.Any("is", err))
-		return nil, err
-	}
-
-	slog.Info("Extracted links after noise removal",
-		slog.String("company", companyUrl),
-		slog.Int("count", len(links)),
-	)
-
-	filteredLinks := filterLinks(links)
-
-	slog.Info("Links after URL filtering",
-		slog.String("company", companyUrl),
-		slog.Int("count", len(filteredLinks)),
-	)
-
-	jobLinks := filterByJobScore(filteredLinks)
-
-	slog.Info("Final job links",
-		slog.String("company", companyUrl),
-		slog.Int("count", len(jobLinks)),
-	)
-
-	return jobLinks, nil
-}
-
-// ==================== STAGE 1: DOM Surgery ====================
-// Remove header, footer, nav, social sections BEFORE extracting links
-
-func removeNoisySections(page playwright.Page) {
-	for _, selector := range excludeSelectors {
-		script := fmt.Sprintf(`
-			document.querySelectorAll('%s').forEach(el => el.remove());
-		`, selector)
-
-		_, err := page.Evaluate(script)
-		if err != nil {
-			continue
-		}
-	}
-
-	slog.Info("Removed noisy DOM sections")
-}
-
-func extractHiddenLinks(page playwright.Page) {
-	jobCardSelectors := []string{
-		"[class*='job-card']",
-		"[class*='job-item']",
-		"[class*='job-listing']",
-		"[class*='position-card']",
-		"[class*='opening-card']",
-		"[class*='career-card']",
-		"[class*='opportunity']",
-		"[class*='posting']",
-		".jobs-list > div",
-		".jobs-list > li",
-		".openings > div",
-		".positions > div",
-		"[data-job]",
-		"[data-position]",
-	}
-
-	for _, selector := range jobCardSelectors {
-		cards := page.Locator(selector)
-		count, err := cards.Count()
-		if err != nil || count == 0 {
-			continue
-		}
-
-		slog.Info("Found job cards to hover", slog.String("selector", selector), slog.Int("count", count))
-
-		for i := 0; i < count && i < 50; i++ {
-			card := cards.Nth(i)
-			err := card.Hover()
-			if err != nil {
-				continue
-			}
-			page.WaitForTimeout(200)
-		}
-
-		break
-	}
-
-	script := `
-		// Make all hidden elements with href visible
-		document.querySelectorAll('a[href]').forEach(a => {
-			a.style.visibility = 'visible';
-			a.style.opacity = '1';
-			a.style.display = 'inline';
-		});
-		
-		// Also check for elements that become links on hover
-		document.querySelectorAll('[data-href], [data-url], [data-link]').forEach(el => {
-			const href = el.getAttribute('data-href') || el.getAttribute('data-url') || el.getAttribute('data-link');
-			if (href && !el.querySelector('a')) {
-				const a = document.createElement('a');
-				a.href = href;
-				a.textContent = el.textContent || 'View Job';
-				el.appendChild(a);
-			}
-		});
-	`
-	page.Evaluate(script)
-}
-
-func checkForJobsLink(page playwright.Page, currentUrl string) string {
-	viewJobsTexts := []string{
-		"View open roles",
-		"View all jobs",
-		"View jobs",
-		"View openings",
-		"View positions",
-		"See all jobs",
-		"See open roles",
-		"See openings",
-		"Explore open roles",
-		"Explore our open roles",
-		"Explore jobs",
-		"Browse jobs",
-		"Browse openings",
-		"Open positions",
-		"Open roles",
-		"Current openings",
-		"Job openings",
-		"All jobs",
-		"See opportunities",
-	}
-
-	for _, text := range viewJobsTexts {
-		locator := page.Locator(fmt.Sprintf(`a:has-text("%s")`, text)).First()
-
-		count, err := locator.Count()
-		if err != nil || count == 0 {
-			continue
-		}
-
-		href, err := locator.GetAttribute("href")
-		if err != nil || href == "" {
-			slog.Info("Clicking 'view jobs' link (no href)", slog.String("text", text))
-			err = locator.Click()
-			if err == nil {
-				page.WaitForLoadState(playwright.PageWaitForLoadStateOptions{
-					State: playwright.LoadStateNetworkidle,
-				})
-				newUrl := page.URL()
-				slog.Info("Clicked 'view jobs' link",
-					slog.String("text", text),
-					slog.String("newUrl", newUrl),
-				)
-				return newUrl
-			}
-			continue
-		}
-
-		resolved := resolveUrl(currentUrl, href)
-		if resolved == "" {
-			continue
-		}
-
-		slog.Info("Navigating to 'view jobs' link",
-			slog.String("text", text),
-			slog.String("href", href),
-			slog.String("resolved", resolved),
-		)
-
-		resp, err := page.Goto(resolved, playwright.PageGotoOptions{
-			WaitUntil: playwright.WaitUntilStateDomcontentloaded,
-			Timeout:   playwright.Float(20000),
-		})
-
-		actualUrl := page.URL()
-
-		if err != nil {
-			slog.Warn("Navigation had error but checking actual URL",
-				slog.String("error", err.Error()),
-				slog.String("actualUrl", actualUrl),
-			)
-			if actualUrl != currentUrl && actualUrl != "" {
-				slog.Info("Landed on new page despite error", slog.String("url", actualUrl))
-				return actualUrl
-			}
-			continue
-		}
-
-		if resp != nil && resp.Status() >= 200 && resp.Status() < 400 {
-			slog.Info("Found and navigated to jobs page",
-				slog.String("text", text),
-				slog.String("url", actualUrl),
-			)
-			return actualUrl
-		}
-	}
-
-	hrefPatterns := []string{
-		`a[href*="open-positions"]`,
-		`a[href*="openings"]`,
-		`a[href*="all-jobs"]`,
-		`a[href*="job-listing"]`,
-		`a[href*="positions"]`,
-	}
-
-	for _, selector := range hrefPatterns {
-		locator := page.Locator(selector).First()
-
-		count, err := locator.Count()
-		if err != nil || count == 0 {
-			continue
-		}
-
-		href, err := locator.GetAttribute("href")
-		if err != nil || href == "" {
-			continue
-		}
-
-		resolved := resolveUrl(currentUrl, href)
-		if resolved == "" {
-			continue
-		}
-
-		slog.Info("Navigating to jobs page via href pattern",
-			slog.String("selector", selector),
-			slog.String("resolved", resolved),
-		)
-
-		resp, err := page.Goto(resolved, playwright.PageGotoOptions{
-			WaitUntil: playwright.WaitUntilStateDomcontentloaded,
-			Timeout:   playwright.Float(20000),
-		})
-
-		actualUrl := page.URL()
-
-		if err != nil {
-			slog.Warn("Navigation had error but checking actual URL",
-				slog.String("error", err.Error()),
-				slog.String("actualUrl", actualUrl),
-			)
-			if actualUrl != currentUrl && actualUrl != "" {
-				slog.Info("Landed on new page despite error", slog.String("url", actualUrl))
-				return actualUrl
-			}
-			continue
-		}
-
-		if resp != nil && resp.Status() >= 200 && resp.Status() < 400 {
-			slog.Info("Found jobs page via href pattern",
-				slog.String("selector", selector),
-				slog.String("url", actualUrl),
-			)
-			return actualUrl
-		}
-	}
-
-	return currentUrl
-}
-
-func extractAllLinks(page playwright.Page, baseUrl string) ([]models.LinkData, error) {
-	extractHiddenLinks(page)
-
-	script := `
-		Array.from(document.querySelectorAll('a[href]')).map(a => ({
-			href: a.getAttribute('href') || '',
-			text: a.innerText.trim() || a.getAttribute('aria-label') || a.getAttribute('title') || ''
-		})).filter(link => link.href !== '')
-	`
-
-	result, err := page.Evaluate(script)
-	if err != nil {
-		return nil, fmt.Errorf("failed to extract links: %w", err)
-	}
-
-	links := []models.LinkData{}
-	seen := make(map[string]bool)
-
-	if items, ok := result.([]interface{}); ok {
-		for _, item := range items {
-			if m, ok := item.(map[string]interface{}); ok {
-				href, _ := m["href"].(string)
-				text, _ := m["text"].(string)
-
-				resolved := resolveUrl(baseUrl, href)
-				if resolved == "" {
-					continue
-				}
-
-				if seen[resolved] {
-					continue
-				}
-
-				cleanedText := cleanText(text)
-				if cleanedText == "" {
-					continue
-				}
-
-				seen[resolved] = true
-				links = append(links, models.LinkData{
-					URL:  resolved,
-					Text: cleanedText,
-				})
-			}
-		}
-	}
-
-	iframeLinks := extractLinksFromIframes(page, baseUrl)
-	for _, link := range iframeLinks {
-		if !seen[link.URL] {
-			seen[link.URL] = true
-			links = append(links, link)
-		}
-	}
-
-	return links, nil
-}
-
-func extractLinksFromIframes(page playwright.Page, baseUrl string) []models.LinkData {
-	links := []models.LinkData{}
-
-	iframes := page.Locator("iframe")
-	count, err := iframes.Count()
-	if err != nil || count == 0 {
-		return links
-	}
-
-	slog.Info("Found iframes", slog.Int("count", count))
-
-	for i := 0; i < count; i++ {
-		iframe := iframes.Nth(i)
-
-		src, err := iframe.GetAttribute("src")
-		if err != nil || src == "" {
-			continue
-		}
-
-		if !isJobBoardIframe(src) {
-			continue
-		}
-
-		slog.Info("Processing job board iframe", slog.String("src", src))
-
-		frameLocator := iframe.ContentFrame()
-
-		anchorLocator := frameLocator.Locator("a[href]")
-		anchorCount, err := anchorLocator.Count()
-		if err != nil || anchorCount == 0 {
-			slog.Info("No links found in iframe", slog.String("src", src))
-			continue
-		}
-
-		slog.Info("Found links in iframe", slog.Int("count", anchorCount), slog.String("src", src))
-
-		for j := 0; j < anchorCount; j++ {
-			anchor := anchorLocator.Nth(j)
-
-			href, err := anchor.GetAttribute("href")
-			if err != nil || href == "" {
-				continue
-			}
-
-			text, _ := anchor.InnerText()
-			if text == "" {
-				text, _ = anchor.GetAttribute("aria-label")
-			}
-			if text == "" {
-				text, _ = anchor.GetAttribute("title")
-			}
-
-			resolved := resolveUrl(src, href)
-			if resolved == "" {
-				continue
-			}
-
-			cleanedText := cleanText(text)
-			if cleanedText == "" {
-				continue
-			}
-
-			links = append(links, models.LinkData{
-				URL:  resolved,
-				Text: cleanedText,
-			})
-		}
-	}
-
-	return links
-}
-
-func isJobBoardIframe(src string) bool {
-	jobBoards := []string{
-		"greenhouse.io",
-		"lever.co",
-		"workday.com",
-		"ashbyhq.com",
-		"bamboohr.com",
-		"recruitee.com",
-		"workable.com",
-		"smartrecruiters.com",
-		"icims.com",
-		"jobvite.com",
-		"myworkdayjobs.com",
-	}
-
-	lower := strings.ToLower(src)
-	for _, board := range jobBoards {
-		if strings.Contains(lower, board) {
-			return true
-		}
-	}
-
-	return false
-}
-
-func filterLinks(links []models.LinkData) []models.LinkData {
-	filtered := []models.LinkData{}
-
-	for _, link := range links {
-		if passesURLFilters(link.URL) {
-			filtered = append(filtered, link)
-		}
-	}
-
-	return filtered
-}
-
-func passesURLFilters(link string) bool {
-	lower := strings.ToLower(link)
-
-	for _, pattern := range noisePatterns {
-		if strings.Contains(lower, pattern) {
-			return false
-		}
-	}
-
-	for _, ext := range assetExtensions {
-		if strings.HasSuffix(lower, ext) {
-			return false
-		}
-	}
-
-	parsed, err := url.Parse(link)
-	if err != nil {
-		return false
-	}
-
-	host := strings.ToLower(parsed.Host)
-	host = strings.TrimPrefix(host, "www.")
-
-	for domain := range socialDomains {
-		if host == domain || strings.HasSuffix(host, "."+domain) {
-			return false
-		}
-	}
-
-	if strings.HasPrefix(link, "#") {
-		return false
-	}
-
-	return true
-}
-
-func filterByJobScore(links []models.LinkData) []models.LinkData {
-	jobLinks := []models.LinkData{}
-
-	for _, link := range links {
-		score := calculateJobScore(link.URL, link.Text)
-		if score >= 2 {
-			// slog.Info("Job Link Found", slog.String("url", link.URL), slog.String("text", link.Text))
-			jobLinks = append(jobLinks, link)
-		}
-	}
-
-	return jobLinks
-}
-
-func calculateJobScore(linkUrl string, text string) int {
-	combined := strings.ToLower(linkUrl + " " + text)
-	score := 0
-
-	jobURLPatterns := []string{
-		"/job/", "/jobs/", "/career/", "/careers/",
-		"/position/", "/positions/", "/opening/", "/openings/",
-		"/role/", "/roles/", "/vacancy/", "/vacancies/",
-		"/apply/", "/opportunity/", "/opportunities/",
-		"greenhouse.io", "lever.co", "workday.com", "ashbyhq.com",
-		"boards.io", "bamboohr.com", "recruitee.com", "workable.com",
-		"smartrecruiters.com", "icims.com", "jobvite.com",
-	}
-
-	for _, pattern := range jobURLPatterns {
-		if strings.Contains(combined, pattern) {
-			score += 3
-		}
-	}
-
-	jobTitleKeywords := []string{
-		"engineer", "developer", "designer", "manager", "director",
-		"analyst", "specialist", "coordinator", "lead", "senior",
-		"junior", "intern", "associate", "consultant", "architect",
-		"scientist", "researcher", "product", "marketing", "sales",
-		"remote", "full-time", "part-time", "contract", "hybrid",
-	}
-
-	for _, keyword := range jobTitleKeywords {
-		if strings.Contains(combined, keyword) {
-			score += 1
-		}
-	}
-
-	negativePatterns := []string{
-		"blog", "article", "news", "press", "team", "about",
-		"culture", "values", "benefits", "perks",
-	}
-
-	for _, pattern := range negativePatterns {
-		if strings.Contains(combined, pattern) {
-			score -= 1
-		}
-	}
-
-	return score
-}
-
-func cleanText(s string) string {
-	fields := strings.Fields(s)
-	return strings.Join(fields, " ")
-}
-
-func navigateToCareersPage(page playwright.Page, companyUrl string) (string, error) {
-	companyUrl = strings.TrimRight(companyUrl, "/")
-
-	careerPaths := []string{
-		"/careers",
-		"/jobs",
-		"/company/jobs",
-		"/company/careers",
-		"/about/careers",
-		"/en/careers",
-		"/work-with-us",
-	}
-
-	for _, path := range careerPaths {
-		targetUrl := companyUrl + path
-
-		resp, err := page.Goto(targetUrl, playwright.PageGotoOptions{
-			WaitUntil: playwright.WaitUntilStateDomcontentloaded,
-			Timeout:   playwright.Float(15000),
-		})
-
-		if err != nil {
-			continue
-		}
-
-		if resp != nil && resp.Status() >= 200 && resp.Status() < 400 {
-			actualUrl := page.URL()
-			slog.Info("Found careers page via direct URL",
-				slog.String("requested", targetUrl),
-				slog.String("actual", actualUrl),
-			)
-			return actualUrl, nil
-		}
-	}
-
-	slog.Info("Direct URLs failed, looking for careers link on homepage", slog.String("company", companyUrl))
-
-	_, err := page.Goto(companyUrl, playwright.PageGotoOptions{
+	resp, err := page.Goto(companyURL, playwright.PageGotoOptions{
 		WaitUntil: playwright.WaitUntilStateDomcontentloaded,
 		Timeout:   playwright.Float(30000),
 	})
 	if err != nil {
-		return "", fmt.Errorf("failed to load homepage: %w", err)
+		return nil, fmt.Errorf("failed to navigate to homepage: %w", err)
 	}
 
-	careersTexts := []string{
-		"Careers", "careers", "Jobs", "jobs",
-		"Join Us", "Join us", "Work with us", "Work With Us",
-		"We're Hiring", "We're hiring",
+	if resp != nil {
+		slog.Info("Homepage response", slog.Int("status", resp.Status()), slog.String("url", resp.URL()))
 	}
 
-	for _, text := range careersTexts {
-		locator := page.Locator(fmt.Sprintf(`text="%s"`, text)).First()
-
-		count, err := locator.Count()
-		if err != nil || count == 0 {
-			continue
-		}
-
-		href, err := locator.GetAttribute("href")
-		if err == nil && href != "" {
-			resolved := resolveUrl(companyUrl, href)
-			if resolved != "" {
-				resp, err := page.Goto(resolved, playwright.PageGotoOptions{
-					WaitUntil: playwright.WaitUntilStateDomcontentloaded,
-					Timeout:   playwright.Float(15000),
-				})
-				if err == nil && resp != nil && resp.Status() >= 200 && resp.Status() < 400 {
-					actualUrl := page.URL()
-					slog.Info("Found careers link on element",
-						slog.String("href", resolved),
-						slog.String("actual", actualUrl),
-					)
-					return actualUrl, nil
-				}
-			}
-		}
-
-		ancestorAnchor := locator.Locator("xpath=ancestor::a").First()
-		count, err = ancestorAnchor.Count()
-		if err == nil && count > 0 {
-			href, err = ancestorAnchor.GetAttribute("href")
-			if err == nil && href != "" {
-				resolved := resolveUrl(companyUrl, href)
-				if resolved != "" {
-					resp, err := page.Goto(resolved, playwright.PageGotoOptions{
-						WaitUntil: playwright.WaitUntilStateDomcontentloaded,
-						Timeout:   playwright.Float(15000),
-					})
-					if err == nil && resp != nil && resp.Status() >= 200 && resp.Status() < 400 {
-						actualUrl := page.URL()
-						slog.Info("Found careers link via ancestor anchor",
-							slog.String("href", resolved),
-							slog.String("actual", actualUrl),
-						)
-						return actualUrl, nil
-					}
-				}
-			}
-		}
-
-		childAnchor := locator.Locator("a").First()
-		count, err = childAnchor.Count()
-		if err == nil && count > 0 {
-			href, err = childAnchor.GetAttribute("href")
-			if err == nil && href != "" {
-				resolved := resolveUrl(companyUrl, href)
-				if resolved != "" {
-					resp, err := page.Goto(resolved, playwright.PageGotoOptions{
-						WaitUntil: playwright.WaitUntilStateDomcontentloaded,
-						Timeout:   playwright.Float(15000),
-					})
-					if err == nil && resp != nil && resp.Status() >= 200 && resp.Status() < 400 {
-						actualUrl := page.URL()
-						slog.Info("Found careers link via child anchor",
-							slog.String("href", resolved),
-							slog.String("actual", actualUrl),
-						)
-						return actualUrl, nil
-					}
-				}
-			}
-		}
-	}
-
-	hrefSelectors := []string{
-		`a[href*="careers"]`,
-		`a[href*="jobs"]`,
-		`a[href*="career"]`,
-		`a[href*="job"]`,
-	}
-
-	page.Goto(companyUrl, playwright.PageGotoOptions{
-		WaitUntil: playwright.WaitUntilStateDomcontentloaded,
-		Timeout:   playwright.Float(15000),
+	page.WaitForLoadState(playwright.PageWaitForLoadStateOptions{
+		State: playwright.LoadStateNetworkidle,
 	})
 
-	for _, selector := range hrefSelectors {
-		locator := page.Locator(selector).First()
+	/* ---------- FIND CAREERS PAGE ---------- */
 
-		count, err := locator.Count()
-		if err != nil || count == 0 {
+	careersURL, _ := findCareersLink(page, baseURL)
+
+	// Fallback: try common career paths if no link found
+	if careersURL == "" {
+		slog.Info("No careers link found, trying common paths")
+		careersURL = tryCommonCareerPaths(page, baseURL)
+	}
+
+	if careersURL == "" {
+		return nil, fmt.Errorf("no careers/jobs page found")
+	}
+
+	fmt.Println("➡️ Careers page:", careersURL)
+
+	resp, err = page.Goto(careersURL, playwright.PageGotoOptions{
+		Timeout: playwright.Float(30000),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to navigate to careers page: %w", err)
+	}
+
+	if resp != nil {
+		slog.Info("Careers page response", slog.Int("status", resp.Status()), slog.String("url", resp.URL()))
+		if resp.Status() >= 400 {
+			return nil, fmt.Errorf("careers page returned status %d", resp.Status())
+		}
+	}
+
+	page.WaitForLoadState(playwright.PageWaitForLoadStateOptions{
+		State: playwright.LoadStateNetworkidle,
+	})
+
+	/* ---------- FIND CTA LINKS FIRST ---------- */
+
+	ctas := findCTAs(page)
+	fmt.Printf("📋 Found %d CTA buttons\n", len(ctas))
+
+	/* ---------- HANDLE EACH CTA ---------- */
+
+	for _, cta := range ctas {
+		fmt.Println("➡️ CTA:", cta.Text, "|", cta.RawHref)
+
+		if strings.HasPrefix(cta.RawHref, "#") {
+			fmt.Println("ℹ️ Hash CTA detected — scraping current page only")
+
+			jobs := scanForJobs(page)
+			jobs = dedupeJobs(jobs)
+
+			if len(jobs) > 0 {
+				fmt.Println("🎯 Jobs found on careers page (hash CTA)")
+				logJobs(jobs)
+				return jobs, nil
+			}
+
 			continue
 		}
 
-		href, err := locator.GetAttribute("href")
-		if err == nil && href != "" {
-			resolved := resolveUrl(companyUrl, href)
-			if resolved != "" {
-				resp, err := page.Goto(resolved, playwright.PageGotoOptions{
-					WaitUntil: playwright.WaitUntilStateDomcontentloaded,
-					Timeout:   playwright.Float(15000),
-				})
-				if err == nil && resp != nil && resp.Status() >= 200 && resp.Status() < 400 {
-					actualUrl := page.URL()
-					slog.Info("Found careers link via href selector",
-						slog.String("href", resolved),
-						slog.String("actual", actualUrl),
-					)
-					return actualUrl, nil
-				}
-			}
+		target := resolveURL(cta.RawHref, baseURL)
+		fmt.Println("🌐 Navigating CTA URL:", target)
+
+		_, err = page.Goto(target, playwright.PageGotoOptions{
+			Timeout: playwright.Float(30000),
+		})
+		if err != nil {
+			slog.Warn("Failed to navigate to CTA", slog.String("url", target), slog.Any("error", err))
+			continue
+		}
+
+		waitForJobContent(page)
+
+		jobs := scanForJobs(page)
+		jobs = dedupeJobs(jobs)
+
+		if len(jobs) > 0 {
+			fmt.Println("🎯 Jobs found via CTA")
+			logJobs(jobs)
+			return jobs, nil
 		}
 	}
 
-	return "", fmt.Errorf("no careers page found for %s", companyUrl)
-}
+	/* ---------- FALLBACK: DIRECT SCAN IF NO CTAs ---------- */
 
-func resolveUrl(baseUrl, href string) string {
-	if strings.HasPrefix(href, "javascript:") {
-		extractedUrl := extractUrlFromJavascript(href)
-		if extractedUrl != "" {
-			return resolveUrl(baseUrl, extractedUrl)
+	if len(ctas) == 0 {
+		fmt.Println("ℹ️ No CTAs found, scanning careers page directly")
+
+		jobs := scanForJobs(page)
+		jobs = dedupeJobs(jobs)
+
+		if len(jobs) > 0 {
+			fmt.Println("🎯 Jobs found directly on careers page")
+			logJobs(jobs)
+			return jobs, nil
 		}
-		return ""
 	}
 
-	if href == "" || href == "#" {
-		return ""
-	}
-
-	if strings.HasPrefix(href, "http") {
-		return href
-	}
-
-	if strings.HasPrefix(href, "//") {
-		return "https:" + href
-	}
-
-	parsed, err := url.Parse(baseUrl)
-	if err != nil {
-		return ""
-	}
-
-	origin := parsed.Scheme + "://" + parsed.Host
-
-	if strings.HasPrefix(href, "/") {
-		return origin + href
-	}
-
-	baseUrl = strings.TrimRight(baseUrl, "/")
-	return baseUrl + "/" + href
+	fmt.Println("🚫 No jobs found")
+	return nil, nil
 }
 
-func extractUrlFromJavascript(js string) string {
-	patterns := []string{
-		`window\.open\(['"]([^'"]+)['"]`,
-		`window\.location\s*=\s*['"]([^'"]+)['"]`,
-		`location\.href\s*=\s*['"]([^'"]+)['"]`,
+func tryCommonCareerPaths(page playwright.Page, baseURL *url.URL) string {
+	commonPaths := []string{
+		"/careers",
+		"/jobs",
+		"/careers/",
+		"/jobs/",
+		"/en/careers",
+		"/about/careers",
+		"/company/careers",
 	}
 
-	for _, pattern := range patterns {
-		re := regexp.MustCompile(pattern)
-		matches := re.FindStringSubmatch(js)
-		if len(matches) > 1 {
-			decoded, err := url.QueryUnescape(matches[1])
-			if err != nil {
-				return matches[1]
-			}
-			return decoded
+	for _, path := range commonPaths {
+		testURL := baseURL.Scheme + "://" + baseURL.Host + path
+		slog.Info("Trying career path", slog.String("url", testURL))
+
+		resp, err := page.Goto(testURL, playwright.PageGotoOptions{
+			Timeout: playwright.Float(10000),
+		})
+		if err != nil {
+			continue
+		}
+
+		if resp != nil && resp.Status() >= 200 && resp.Status() < 400 {
+			slog.Info("✅ Found valid career path", slog.String("url", testURL), slog.Int("status", resp.Status()))
+			return testURL
 		}
 	}
 
 	return ""
+}
+
+/* ================= FIND CAREERS ================= */
+
+func findCareersLink(page playwright.Page, base *url.URL) (string, error) {
+	js := `
+	() => {
+		const K = %s;
+		for (const a of document.querySelectorAll("footer a, a")) {
+			const t = a.innerText?.toLowerCase();
+			if (t && K.some(k => t.includes(k))) {
+				return a.getAttribute("href");
+			}
+		}
+		return null;
+	}
+	`
+
+	res, _ := page.Evaluate(fmt.Sprintf(js, toJSArray(careerKeywords)))
+	if res == nil {
+		return "", nil
+	}
+
+	href, ok := res.(string)
+	if !ok {
+		return "", nil
+	}
+
+	return resolveURL(href, base), nil
+}
+
+/* ================= FIND CTAs ================= */
+
+type CTA struct {
+	Text    string
+	RawHref string
+	XPath   string
+}
+
+func findCTAs(page playwright.Page) []CTA {
+	js := `
+	() => {
+		const K = %s;
+
+		function xpath(el) {
+			const parts = [];
+			while (el && el.nodeType === 1) {
+				let i = 1;
+				for (let sib = el.previousSibling; sib; sib = sib.previousSibling)
+					if (sib.nodeType === 1 && sib.tagName === el.tagName) i++;
+				parts.unshift(el.tagName.toLowerCase() + "[" + i + "]");
+				el = el.parentNode;
+			}
+			return "/" + parts.join("/");
+		}
+
+		const out = [];
+		for (const a of document.querySelectorAll("a")) {
+			if (a.closest("header") || a.closest("footer") || a.closest("nav")) continue;
+
+			const t = a.innerText?.trim()?.toLowerCase();
+			if (!t || !K.some(k => t.includes(k))) continue;
+
+			const href = a.getAttribute("href");
+			if (!href || href === "#" || href.startsWith("javascript")) continue;
+
+			out.push({
+				text: a.innerText.trim(),
+				href: href,
+				xpath: xpath(a)
+			});
+		}
+		return out;
+	}
+	`
+
+	res, _ := page.Evaluate(fmt.Sprintf(js, toJSArray(ctaKeywords)))
+	var ctas []CTA
+
+	arr, ok := res.([]interface{})
+	if !ok {
+		return ctas
+	}
+
+	for _, v := range arr {
+		m := v.(map[string]interface{})
+		ctas = append(ctas, CTA{
+			Text:    toString(m["text"]),
+			RawHref: toString(m["href"]),
+			XPath:   toString(m["xpath"]),
+		})
+	}
+
+	return ctas
+}
+
+/* ================= JOB SCAN ================= */
+
+func scanForJobs(page playwright.Page) []models.LinkData {
+	slog.Info("👉 ENTER scanForJobs (container-aware, text-only)")
+
+	page.WaitForLoadState(playwright.PageWaitForLoadStateOptions{
+		State: playwright.LoadStateNetworkidle,
+	})
+
+	var jobs []models.LinkData
+	seen := make(map[string]bool)
+
+	// Try to find Greenhouse/Lever/ATS iframe
+	atsIframe := page.FrameLocator("iframe[src*='greenhouse.io'], iframe[src*='lever.co'], iframe[src*='workday.com'], iframe[src*='ashbyhq.com']")
+
+	// Check if iframe exists by trying to get an anchor inside it
+	anchors := atsIframe.Locator("a[href]")
+	count, err := anchors.Count()
+
+	if err != nil || count == 0 {
+		slog.Info("No ATS iframe found, falling back to main page")
+		anchors = page.Locator("a[href]")
+		count, _ = anchors.Count()
+	} else {
+		slog.Info("🖼️ Found ATS iframe, scanning inside", slog.Int("anchor_count", count))
+	}
+
+	for i := 0; i < count; i++ {
+		a := anchors.Nth(i)
+
+		href, err := a.GetAttribute("href")
+		if err != nil {
+			continue
+		}
+		href = strings.TrimSpace(href)
+		if href == "" || href == "#" {
+			continue
+		}
+
+		slog.Debug("🔗 Processing anchor", slog.String("href", href))
+
+		// 1️⃣ Anchor text
+		text, _ := a.TextContent()
+		text = strings.TrimSpace(text)
+
+		// 2️⃣ Fallback to container text
+		if len(text) < 3 {
+			container := a.Locator("xpath=ancestor::tr[1] | ancestor::li[1] | ancestor::div[1]")
+			if cCount, _ := container.Count(); cCount > 0 {
+				ct, _ := container.First().TextContent()
+				text = strings.TrimSpace(ct)
+			}
+		}
+
+		lowerText := strings.ToLower(text)
+
+		if !containsAny(lowerText, jobKeywords) {
+			continue
+		}
+
+		if seen[href] {
+			continue
+		}
+		seen[href] = true
+
+		slog.Info("✅ Job found", slog.String("href", href), slog.String("text", text))
+
+		jobs = append(jobs, models.LinkData{
+			Text: text,
+			URL:  href,
+		})
+	}
+
+	slog.Info("📊 Jobs found after scan", slog.Int("jobs", len(jobs)))
+	return jobs
+}
+
+/* ================= HASH / SPA WAIT ================= */
+
+func waitForJobContent(page playwright.Page) {
+	page.WaitForFunction(`
+	() => {
+		const t = document.body.innerText.toLowerCase();
+		return (
+			t.includes("engineer") ||
+			t.includes("developer") ||
+			t.includes("manager") ||
+			t.includes("senior")
+		);
+	}
+	`, playwright.PageWaitForFunctionOptions{
+		Timeout: playwright.Float(float64(jobWaitTimeout.Milliseconds())),
+	})
+}
+
+/* ================= HELPERS ================= */
+
+func containsAny(text string, words []string) bool {
+	for _, w := range words {
+		if strings.Contains(text, w) {
+			return true
+		}
+	}
+	return false
+}
+
+func dedupeJobs(jobs []models.LinkData) []models.LinkData {
+	seen := make(map[string]bool)
+	var out []models.LinkData
+
+	for _, job := range jobs {
+		if job.URL == "" || seen[job.URL] {
+			continue
+		}
+		seen[job.URL] = true
+		out = append(out, job)
+	}
+	return out
+}
+
+func logJobs(jobs []models.LinkData) {
+	fmt.Println("📋 Job listings:")
+	for i, job := range jobs {
+		fmt.Printf("  %d. %s\n     %s\n", i+1, job.Text, job.URL)
+	}
+}
+
+func toJSArray(arr []string) string {
+	slog.Info("converting to JS array in toJSArray func")
+	q := make([]string, len(arr))
+	for i, s := range arr {
+		q[i] = `"` + s + `"`
+	}
+	return "[" + strings.Join(q, ",") + "]"
+}
+
+func parseJobs(res interface{}) []models.LinkData {
+	slog.Info("we are in parseJobs func")
+	var out []models.LinkData
+	arr, ok := res.([]interface{})
+	if !ok {
+		return out
+	}
+
+	for _, v := range arr {
+		m := v.(map[string]interface{})
+		out = append(out, models.LinkData{
+			Text: toString(m["text"]),
+			URL:  toString(m["href"]),
+		})
+		slog.Debug("Found job", slog.String("text", toString(m["text"])), slog.String("url", toString(m["href"])))
+	}
+	return out
+}
+
+func toString(v interface{}) string {
+	if s, ok := v.(string); ok {
+		return s
+	}
+	return ""
+}
+
+func resolveURL(href string, base *url.URL) string {
+	slog.Info("resolving URL", href)
+	u, err := url.Parse(href)
+	if err != nil {
+		return href
+	}
+	return base.ResolveReference(u).String()
 }

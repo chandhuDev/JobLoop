@@ -47,3 +47,11 @@ func (db *DatabaseService) CreateSchema() error {
 func (db *DatabaseService) GetDB() *gorm.DB {
 	return db.DB.DB
 }
+
+func (db *DatabaseService) Close() error {
+	sqlDB, err := db.DB.DB.DB()
+	if err != nil {
+		return fmt.Errorf("failed to get sqlDB: %w", err)
+	}
+	return sqlDB.Close()
+}

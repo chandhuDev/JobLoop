@@ -17,10 +17,14 @@ func SetUpErrorClient() *models.ErrorHandler {
 }
 func (e *ErrorService) HandleError() {
 	for err := range e.ErrorHandler.ErrChan {
-		slog.Info("error from worker %d: message: %s\n", err.WorkerId, err.Message)
+		slog.Error("error message: %s\n", err.Message, err)
 	}
 }
 
 func (e *ErrorService) Send(error models.WorkerError) {
 	e.ErrorHandler.ErrChan <- error
+}
+
+func (e *ErrorService) Close() {
+	close(e.ErrorHandler.ErrChan)
 }
