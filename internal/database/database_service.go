@@ -4,11 +4,12 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/chandhuDev/JobLoop/internal/logger"
 	"github.com/chandhuDev/JobLoop/internal/models"
 	"github.com/chandhuDev/JobLoop/internal/schema"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
-	"gorm.io/gorm/logger"
+	gormlogger "gorm.io/gorm/logger"
 )
 
 type DatabaseService struct {
@@ -25,10 +26,10 @@ func ConnectDatabase() *models.Database {
 	)
 
 	dbInstance, err := gorm.Open(postgres.Open(dsn), &gorm.Config{
-		Logger: logger.Default.LogMode(logger.Info),
+		Logger: gormlogger.Default.LogMode(gormlogger.Info),
 	})
 	if err != nil {
-		fmt.Println("db connect failed: %w", err)
+		logger.Error().Err(err).Msg("db connect failed")
 	}
 
 	return &models.Database{

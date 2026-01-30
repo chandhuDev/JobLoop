@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -10,6 +9,7 @@ import (
 	"time"
 
 	dbService "github.com/chandhuDev/JobLoop/internal/database"
+	"github.com/chandhuDev/JobLoop/internal/logger"
 	models "github.com/chandhuDev/JobLoop/internal/models"
 	service "github.com/chandhuDev/JobLoop/internal/service"
 	"github.com/joho/godotenv"
@@ -17,15 +17,18 @@ import (
 )
 
 func main() {
+	// Initialize logger
+	logger.Init(logger.DefaultConfig())
+
 	if err := godotenv.Load(); err != nil {
-		slog.Error("error loading env file", slog.Any("error", err))
+		logger.Error().Err(err).Msg("error loading env file")
 		os.Exit(1)
 	}
 
 	requiredEnvs := []string{"GOOGLE_API_KEY", "GOOGLE_SEARCH_ENGINE"}
 	for _, env := range requiredEnvs {
 		if os.Getenv(env) == "" {
-			slog.Error("required env variable not set", slog.String("var", env))
+			logger.Error().Str("var", env).Msg("required env variable not set")
 			os.Exit(1)
 		}
 	}
@@ -38,40 +41,31 @@ func main() {
 
 	go func() {
 		sig := <-sigChan
-		slog.Info("Signal received, initiating shutdown...", slog.String("signal", sig.String()))
+		logger.Info().Str("signal", sig.String()).Msg("Signal received, initiating shutdown...")
 		cancel()
 	}()
-
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
-		Level: slog.LevelInfo,
-	}))
-	slog.SetDefault(logger)
 
 	// Run the app
 	exitCode := run(ctx)
 
-	slog.Info("Shutdown complete")
+	logger.Info().Msg("Shutdown complete")
 	os.Exit(exitCode)
 }
 
 func run(ctx context.Context) int {
-	// Error service
-	errConfig := service.SetUpErrorClient()
-	errInstance := &service.ErrorService{ErrorHandler: errConfig}
-	go errInstance.HandleError()
-	defer errInstance.Close()
+
 
 	// Database
 	dbInstance := dbService.ConnectDatabase()
 	if dbInstance == nil {
-		slog.Error("failed to connect to database")
+		logger.Error().Msg("failed to connect to database")
 		return 1
 	}
 	dbSvc := &dbService.DatabaseService{DB: dbInstance}
 	defer dbSvc.Close()
 
 	if err := dbSvc.CreateSchema(); err != nil {
-		slog.Error("error creating schema", slog.Any("error", err))
+		logger.Error().Err(err).Msg("error creating schema")
 		return 1
 	}
 
@@ -83,18 +77,18 @@ func run(ctx context.Context) int {
 	}
 	browserInstance, err := service.CreateNewBrowser(browserOptions, ctx)
 	if err != nil {
-		slog.Error("error creating browser", slog.Any("error", err))
+		logger.Error().Err(err).Msg("error creating browser")
 		return 1
 	}
 	defer func() {
-		slog.Info("Closing browser...")
+		logger.Info().Msg("Closing browser...")
 		browserInstance.Close()
-		slog.Info("Browser closed")
+		logger.Info().Msg("Browser closed")
 	}()
 
 	searchInstance, err := service.CreateSearchService(ctx)
 	if err != nil {
-		slog.Error("error creating search service", slog.Any("error", err))
+		logger.Error().Err(err).Msg("error creating search service")
 		return 1
 	}
 	searchConfig := service.SetUpSearch(searchInstance)
@@ -105,13 +99,13 @@ func run(ctx context.Context) int {
 
 	visionInstance, err := service.CreateVisionInstance(ctx)
 	if err != nil {
-		slog.Error("error creating vision service", slog.Any("error", err))
+		logger.Error().Err(err).Msg("error creating vision service")
 		return 1
 	}
 	defer func() {
-		slog.Info("Closing vision client...")
+		logger.Info().Msg("Closing vision client...")
 		visionInstance.Close()
-		slog.Info("Vision client closed")
+		logger.Info().Msg("Vision client closed")
 	}()
 
 	visionConfig := service.SetUpVision(visionInstance, ctx, namesChannel.ReturnNamesChan())
@@ -123,13 +117,12 @@ func run(ctx context.Context) int {
 
 		visionInstance,
 		search,
-		errInstance,
 		// dbSvc,
 		namesChannel.ReturnNamesChan(),
 	)
 
 	if scraperClient == nil || scraperClient.Search == nil || scraperClient.Browser == nil {
-		slog.Error("scraper client not properly initialized")
+		logger.Error().Msg("scraper client not properly initialized")
 		return 1
 	}
 
@@ -162,14 +155,14 @@ func run(ctx context.Context) int {
 
 	httpHandler := service.NewHTTPHandlerService(dbSvc.DB)
 	server := &http.Server{
-		Addr:    ":8081",
+		Addr:    ":5000",
 		Handler: httpHandler,
 	}
 
 	g, gCtx := errgroup.WithContext(ctx)
 
 	g.Go(func() error {
-		slog.Info("Starting HTTP server", slog.String("addr", server.Addr))
+		logger.Info().Str("addr", server.Addr).Msg("Starting HTTP server")
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			return err
 		}
@@ -178,7 +171,7 @@ func run(ctx context.Context) int {
 
 	g.Go(func() error {
 		<-gCtx.Done()
-		slog.Info("Shutting down HTTP server...")
+		logger.Info().Msg("Shutting down HTTP server...")
 		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer shutdownCancel()
 		return server.Shutdown(shutdownCtx)
@@ -187,18 +180,18 @@ func run(ctx context.Context) int {
 	g.Go(func() error {
 		defer func() {
 			if r := recover(); r != nil {
-				slog.Error("Panic in SeedCompany", slog.Any("error", r))
+				logger.Error().Interface("error", r).Msg("Panic in SeedCompany")
 			}
 		}()
 		seedCompany.SeedCompanyConfigs(gCtx, scraperClient)
-		slog.Info("SeedCompany finished")
+		logger.Info().Msg("SeedCompany finished")
 		return nil
 	})
 
 	g.Go(func() error {
 		defer func() {
 			if r := recover(); r != nil {
-				slog.Error("Panic in Testimonial", slog.Any("error", r))
+				logger.Error().Interface("error", r).Msg("Panic in Testimonial")
 				close(abcdChan)
 			}
 		}()
@@ -206,7 +199,7 @@ func run(ctx context.Context) int {
 			// seedCompany.SeedCompany.ResultChan,
 			abcdChan,
 			*visionWrapper)
-		slog.Info("Testimonial finished")
+		logger.Info().Msg("Testimonial finished")
 		return nil
 	})
 
@@ -217,10 +210,10 @@ func run(ctx context.Context) int {
 	}
 
 	if err := g.Wait(); err != nil {
-		slog.Error("Error in errgroup", slog.Any("error", err))
+		logger.Error().Err(err).Msg("Error in errgroup")
 		return 1
 	}
 
-	slog.Info("All work completed successfully")
+	logger.Info().Msg("All work completed successfully")
 	return 0
 }

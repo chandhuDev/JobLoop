@@ -4,12 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"net/url"
 	"strings"
 	"sync"
 
 	interfaces "github.com/chandhuDev/JobLoop/internal/interfaces"
+	"github.com/chandhuDev/JobLoop/internal/logger"
 	models "github.com/chandhuDev/JobLoop/internal/models"
 	"github.com/playwright-community/playwright-go"
 )
@@ -42,30 +42,30 @@ func (t *TestimonialService) ScrapeTestimonial(
 
 		go func(workerID int) {
 			defer t.Testimonial.TestimonialWg.Done()
-			slog.Info("Starting Testimonial worker", slog.Int("worker_id", workerID))
+			logger.Info().Int("worker_id", workerID).Msg("Starting Testimonial worker")
 
 			page, err := scraper.Browser.RunInNewTab()
 			if err != nil {
-				slog.Error("Failed to create page", slog.Int("worker_id", workerID), slog.Any("error", err))
+				logger.Error().Int("worker_id", workerID).Err(err).Msg("Failed to create page")
 				return
 			}
 			defer func() {
-				slog.Info("Closing page", slog.Int("worker_id", workerID))
+				logger.Info().Int("worker_id", workerID).Msg("Closing page")
 				page.Close()
 			}()
 
 			for {
 				select {
 				case <-ctx.Done():
-					slog.Info("Testimonial worker stopping (context cancelled)", slog.Int("worker_id", workerID))
+					logger.Info().Int("worker_id", workerID).Msg("Testimonial worker stopping (context cancelled)")
 					return
 				case scr, ok := <-dupChan:
 					if !ok {
-						slog.Info("Testimonial worker stopping (channel closed)", slog.Int("worker_id", workerID))
+						logger.Info().Int("worker_id", workerID).Msg("Testimonial worker stopping (channel closed)")
 						return
 					}
 
-					slog.Info("Processing", slog.Int("worker", workerID), slog.String("company", scr.CompanyName))
+					logger.Info().Int("worker", workerID).Str("company", scr.CompanyName).Msg("Processing")
 
 					urls := t.scrapeCompany(ctx, page, scr)
 					if len(urls) > 0 {
@@ -76,7 +76,7 @@ func (t *TestimonialService) ScrapeTestimonial(
 							URL:           urls,
 						}:
 						case <-ctx.Done():
-							slog.Info("Testimonial worker stopping during send", slog.Int("worker_id", workerID))
+							logger.Info().Int("worker_id", workerID).Msg("Testimonial worker stopping during send")
 							return
 						}
 					}
@@ -91,26 +91,23 @@ func (t *TestimonialService) ScrapeTestimonial(
 
 		go func(workerID int) {
 			defer t.Testimonial.ImageWg.Done()
-			slog.Info("Starting Image worker", slog.Int("worker_id", workerID))
+			logger.Info().Int("worker_id", workerID).Msg("Starting Image worker")
 
 			for {
 				select {
 				case <-ctx.Done():
-					slog.Info("Image worker stopping (context cancelled)", slog.Int("worker_id", workerID))
+					logger.Info().Int("worker_id", workerID).Msg("Image worker stopping (context cancelled)")
 					return
 				case job, ok := <-t.Testimonial.ImageResultChan:
 					if !ok {
-						slog.Info("Image worker stopping (channel closed)", slog.Int("worker_id", workerID))
+						logger.Info().Int("worker_id", workerID).Msg("Image worker stopping (channel closed)")
 						return
 					}
 
-					slog.Info("Processing images",
-						slog.Int("worker", workerID),
-						slog.String("company", job.CompanyName),
-						slog.Int("count", len(job.URL)))
+					logger.Info().Int("worker", workerID).Str("company", job.CompanyName).Int("count", len(job.URL)).Msg("Processing images")
 
 					for _, url := range job.URL {
-						slog.Info("Extracting text from image", slog.String("url", url))
+						logger.Info().Str("url", url).Msg("Extracting text from image")
 					}
 
 					//  vision.ExtractTextFromImage(job.URL, scraper, workerID, job.SeedCompanyId)
@@ -121,12 +118,12 @@ func (t *TestimonialService) ScrapeTestimonial(
 
 	// Wait for testimonial workers, then close image channel
 	t.Testimonial.TestimonialWg.Wait()
-	slog.Info("All testimonial workers finished, closing image channel")
+	logger.Info().Msg("All testimonial workers finished, closing image channel")
 	close(t.Testimonial.ImageResultChan)
 
 	// Wait for image workers
 	t.Testimonial.ImageWg.Wait()
-	slog.Info("All image workers finished")
+	logger.Info().Msg("All image workers finished")
 }
 
 func (t *TestimonialService) scrapeCompany(
@@ -146,27 +143,27 @@ func (t *TestimonialService) scrapeCompany(
 		pageURL = "https://" + pageURL
 	}
 
-	slog.Info("Navigating to", slog.String("url", pageURL))
+	logger.Info().Str("url", pageURL).Msg("Navigating to")
 
 	// Use 'load' instead of 'networkidle' - networkidle can timeout on heavy sites
 	resp, err := page.Goto(pageURL, playwright.PageGotoOptions{
 		WaitUntil: playwright.WaitUntilStateLoad,
 		Timeout:   playwright.Float(30000), // Reduce timeout
 	})
-	
+
 	// Check if we got blocked (403) vs just timeout
 	if resp != nil {
 		status := resp.Status()
 		if status == 403 || status == 401 {
-			slog.Warn("Access denied", slog.Int("status", status), slog.String("company", scr.CompanyName))
+			logger.Warn().Int("status", status).Str("company", scr.CompanyName).Msg("Access denied")
 			return nil
 		}
-		slog.Info("Page response", slog.Int("status", status))
+		logger.Info().Int("status", status).Msg("Page response")
 	}
-	
+
 	// Timeout is OK - page might still have loaded
 	if err != nil {
-		slog.Warn("Navigation warning (continuing anyway)", slog.String("url", pageURL), slog.Any("error", err))
+		logger.Warn().Str("url", pageURL).Err(err).Msg("Navigation warning (continuing anyway)")
 	}
 
 	// Wait for body to exist
@@ -176,7 +173,7 @@ func (t *TestimonialService) scrapeCompany(
 		Timeout: playwright.Float(10000),
 	})
 	if err != nil {
-		slog.Error("DOM never became ready", slog.Any("error", err))
+		logger.Error().Err(err).Msg("DOM never became ready")
 		return nil
 	}
 
@@ -213,19 +210,19 @@ func (t *TestimonialService) scrapeCompany(
 
 	// Check if page is actually loaded (not blocked)
 	title, _ := page.Title()
-	if strings.Contains(strings.ToLower(title), "access denied") || 
-	   strings.Contains(strings.ToLower(title), "blocked") ||
-	   strings.Contains(strings.ToLower(title), "forbidden") {
-		slog.Warn("Page blocked", slog.String("title", title), slog.String("company", scr.CompanyName))
+	if strings.Contains(strings.ToLower(title), "access denied") ||
+		strings.Contains(strings.ToLower(title), "blocked") ||
+		strings.Contains(strings.ToLower(title), "forbidden") {
+		logger.Warn().Str("title", title).Str("company", scr.CompanyName).Msg("Page blocked")
 		return nil
 	}
 
 	count, _ := page.Evaluate(`() => document.querySelectorAll("img").length`)
-	slog.Info("IMG COUNT", slog.Any("count", count), slog.String("company", scr.CompanyName))
+	logger.Info().Interface("count", count).Str("company", scr.CompanyName).Msg("IMG COUNT")
 
 	jsonStr, err := scrapeTestimonialImageUrls(page)
 	if err != nil {
-		slog.Error("JS evaluation failed", slog.String("company", scr.CompanyName), slog.Any("error", err))
+		logger.Error().Str("company", scr.CompanyName).Err(err).Msg("JS evaluation failed")
 		return nil
 	}
 
@@ -239,12 +236,12 @@ func (t *TestimonialService) scrapeCompany(
 	var data testimonialJSResult
 
 	if err := json.Unmarshal([]byte(jsonStr), &data); err != nil {
-		slog.Error("Failed to unmarshal JS result", slog.Any("error", err))
+		logger.Error().Err(err).Msg("Failed to unmarshal JS result")
 		return nil
 	}
 
 	if !data.Found || len(data.Images) == 0 {
-		slog.Warn("No testimonial images found", slog.String("company", scr.CompanyName))
+		logger.Warn().Str("company", scr.CompanyName).Msg("No testimonial images found")
 		return nil
 	}
 
@@ -257,16 +254,11 @@ func (t *TestimonialService) scrapeCompany(
 	}
 
 	if len(normalized) == 0 {
-		slog.Warn("Images extracted but empty after normalization", slog.String("company", scr.CompanyName))
+		logger.Warn().Str("company", scr.CompanyName).Msg("Images extracted but empty after normalization")
 		return nil
 	}
 
-	slog.Info(
-		"Testimonial images found",
-		slog.String("company", scr.CompanyName),
-		slog.String("phase", data.Phase),
-		slog.Int("count", len(normalized)),
-	)
+	logger.Info().Str("company", scr.CompanyName).Str("phase", data.Phase).Int("count", len(normalized)).Msg("Testimonial images found")
 
 	return normalized
 }
@@ -302,7 +294,7 @@ func toAbsoluteURL(baseURL, src string) string {
 
 func scrapeTestimonialImageUrls(page playwright.Page) (string, error) {
 	count, _ := page.Evaluate(`() => document.querySelectorAll("img").length`)
-	slog.Warn("IMG COUNT BEFORE EVAL", slog.Any("count", count))
+	logger.Warn().Interface("count", count).Msg("IMG COUNT BEFORE EVAL")
 	result, err := page.Evaluate(`
 	() => {
 	  /* ================= CONFIG ================= */

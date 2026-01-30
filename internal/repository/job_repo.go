@@ -1,8 +1,7 @@
 package repository
 
 import (
-	"log/slog"
-
+	"github.com/chandhuDev/JobLoop/internal/logger"
 	"github.com/chandhuDev/JobLoop/internal/models"
 	"github.com/chandhuDev/JobLoop/internal/schema"
 	"gorm.io/gorm"
@@ -19,7 +18,7 @@ func UpsertJob(DB *gorm.DB, scid uint, jobs []models.LinkData) error {
 		})
 	}
 
-	slog.Info("upserting jobs", slog.Int("count", len(jobRecords)), slog.Any("seed_company_id", scid))
+	logger.Info().Int("count", len(jobRecords)).Uint("seed_company_id", scid).Msg("upserting jobs")
 
 	return DB.Clauses(clause.OnConflict{
 		Columns: []clause.Column{

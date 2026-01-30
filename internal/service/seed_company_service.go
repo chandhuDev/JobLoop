@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"log/slog"
 	"os"
 	"regexp"
 	"strings"
@@ -11,6 +10,7 @@ import (
 	"time"
 
 	"github.com/chandhuDev/JobLoop/internal/interfaces"
+	"github.com/chandhuDev/JobLoop/internal/logger"
 	"github.com/chandhuDev/JobLoop/internal/models"
 	"github.com/chandhuDev/JobLoop/internal/repository"
 	"github.com/playwright-community/playwright-go"
@@ -39,13 +39,13 @@ func NewSeedCompanyArray(firstSeedCompany models.SeedCompany, secondSeedCompany 
 }
 
 func (s *SeedCompanyService) SeedCompanyConfigs(ctx context.Context, scraper *interfaces.ScraperClient) {
-	slog.Info("seed company scraper started")
+	logger.Info().Msg("seed company scraper started")
 	defer close(s.SeedCompany.ResultChan)
 
 	for i := 0; i < len(s.SeedCompany.Companies); i++ {
 		select {
 		case <-ctx.Done():
-			slog.Info("SeedCompany stopping (context cancelled)")
+			logger.Info().Msg("SeedCompany stopping (context cancelled)")
 			return
 		default:
 		}
@@ -66,59 +66,47 @@ func (s *SeedCompanyService) SeedCompanyConfigs(ctx context.Context, scraper *in
 
 	s.SeedCompany.PWg.Wait()
 	s.SeedCompany.YCWg.Wait()
-	slog.Info("closing seedcompany waitgroups and result channel")
+	logger.Info().Msg("closing seedcompany waitgroups and result channel")
 }
 
 func (s *SeedCompanyService) GetSeedCompaniesFromPeerList(scraper *interfaces.ScraperClient, sp *models.SeedCompany, ctx context.Context) {
-	slog.Info("worker started for peerlist")
+	logger.Info().Msg("worker started for peerlist")
 
 	page, err := scraper.Browser.RunInNewTab()
 	if err != nil {
-		scraper.Err.Send(models.WorkerError{
-			WorkerId: -1,
-			Message:  "error creating page for peerlist",
-			Err:      err,
-		})
+		logger.Error().Err(err).Int("worker_id", -1).Msg("error creating page for peerlist")
 		return
 	}
 	defer page.Close()
 
-	slog.Info("START processing for peerlist", slog.Time("time", time.Now()))
+	logger.Info().Time("time", time.Now()).Msg("START processing for peerlist")
 
 	if _, err := page.Goto(sp.URL, playwright.PageGotoOptions{
 		WaitUntil: playwright.WaitUntilStateDomcontentloaded,
 	}); err != nil {
-		scraper.Err.Send(models.WorkerError{
-			WorkerId: -1,
-			Message:  "error navigating to peerlist",
-			Err:      err,
-		})
+		logger.Error().Err(err).Int("worker_id", -1).Msg("error navigating to peerlist")
 		return
 	}
 
 	locator := page.Locator(sp.Selector)
 	count, err := locator.Count()
 	if err != nil {
-		scraper.Err.Send(models.WorkerError{
-			WorkerId: -1,
-			Message:  "error getting peerlist nodes count",
-			Err:      err,
-		})
+		logger.Error().Err(err).Int("worker_id", -1).Msg("error getting peerlist nodes count")
 		return
 	}
 
-	slog.Info("Found nodes with selector in peerlist", slog.Int("length", count), slog.String("selector", sp.Selector))
+	logger.Info().Int("length", count).Str("selector", sp.Selector).Msg("Found nodes with selector in peerlist")
 
 	go func() {
 		for i := 0; i < count; i++ {
-			slog.Info("sending names to namesChan of peerlist from worker", slog.Int("index", i))
+			logger.Info().Int("index", i).Msg("sending names to namesChan of peerlist from worker")
 
 			item := locator.Nth(i)
 			pElement := item.Locator("div:first-child > p")
 
 			urlText, err := pElement.TextContent()
 			if err != nil {
-				slog.Error("error getting text", slog.Any("error", err))
+				logger.Error().Err(err).Msg("error getting text")
 				continue
 			}
 			scraper.NamesChanClient.NamesChan <- LastWord(urlText)
@@ -129,14 +117,14 @@ func (s *SeedCompanyService) GetSeedCompaniesFromPeerList(scraper *interfaces.Sc
 }
 
 func (s *SeedCompanyService) GetSeedCompaniesFromYCombinator(ctx context.Context, scraper *interfaces.ScraperClient, yc *models.SeedCompany) {
-	slog.Info("worker started for ycombinator")
+	logger.Info().Msg("worker started for ycombinator")
 
 	const maxCompanies = 50
 	var processedCount atomic.Int32
 
 	page, err := scraper.Browser.RunInNewTab()
 	if err != nil {
-		slog.Error("error creating page for ycombinator", slog.Any("error", err))
+		logger.Error().Err(err).Msg("error creating page for ycombinator")
 		return
 	}
 	defer page.Close()
@@ -144,7 +132,7 @@ func (s *SeedCompanyService) GetSeedCompaniesFromYCombinator(ctx context.Context
 	if _, err := page.Goto(yc.URL, playwright.PageGotoOptions{
 		WaitUntil: playwright.WaitUntilStateDomcontentloaded,
 	}); err != nil {
-		slog.Error("error navigating to ycombinator", slog.Any("error", err))
+		logger.Error().Err(err).Msg("error navigating to ycombinator")
 		return
 	}
 
@@ -154,12 +142,12 @@ func (s *SeedCompanyService) GetSeedCompaniesFromYCombinator(ctx context.Context
 
 	locator := page.Locator(yc.Selector)
 	count, _ := locator.Count()
-	slog.Info("Found companies", slog.Int("count", count))
+	logger.Info().Int("count", count).Msg("Found companies")
 
 	for i := 0; i < count; i++ {
 		// Check if we've reached the limit
 		if processedCount.Load() >= maxCompanies {
-			slog.Info("Reached maximum company limit, stopping YCombinator scraping", slog.Int("processed", int(processedCount.Load())))
+			logger.Info().Int("processed", int(processedCount.Load())).Msg("Reached maximum company limit, stopping YCombinator scraping")
 			break
 		}
 		// if i >= count {
@@ -172,23 +160,23 @@ func (s *SeedCompanyService) GetSeedCompaniesFromYCombinator(ctx context.Context
 		nameLocator := item.Locator("span").First()
 		name, err := nameLocator.TextContent()
 		if err != nil {
-			slog.Error("error getting name at YC", slog.Any("error", err))
+			logger.Error().Err(err).Msg("error getting name at YC")
 			continue
 		}
 		name = strings.TrimSpace(name)
 		if err := item.Click(); err != nil {
-			slog.Error("error clicking item at YC", slog.Any("error", err))
+			logger.Error().Err(err).Msg("error clicking item at YC")
 			continue
 		}
 
 		urlLocator := page.Locator("div.group a").First()
 		url, err := urlLocator.GetAttribute("href")
 		if err != nil {
-			slog.Error("error getting url at YC", slog.Any("error", err))
+			logger.Error().Err(err).Msg("error getting url at YC")
 			url = ""
 		}
 
-		slog.Info("seed company Ycombinator", slog.String("CompanyName", name), slog.String("CompanyURL", url))
+		logger.Info().Str("CompanyName", name).Str("CompanyURL", url).Msg("seed company Ycombinator")
 
 		// Increment counter
 		processedCount.Add(1)
@@ -201,12 +189,12 @@ func (s *SeedCompanyService) GetSeedCompaniesFromYCombinator(ctx context.Context
 			scrapedJobResults, err := getJobResults(scraper.Browser, companyUrl)
 
 			if err != nil {
-				slog.Error("❌ FAILED to scrape jobs (likely no careers page)", slog.String("company", companyName), slog.String("url", companyUrl), slog.Any("error", err))
+				logger.Error().Str("company", companyName).Str("url", companyUrl).Err(err).Msg("FAILED to scrape jobs (likely no careers page)")
 				return
 			}
 			repository.UpsertJob(scraper.DbClient.GetDB(), seedId, scrapedJobResults)
 
-			slog.Info("✅ SUCCESS: Upserted jobs", slog.String("company", companyName), slog.Int("job_count", len(scrapedJobResults)))
+			logger.Info().Str("company", companyName).Int("job_count", len(scrapedJobResults)).Msg("SUCCESS: Upserted jobs")
 
 		}(url, scrId, name)
 
@@ -217,13 +205,13 @@ func (s *SeedCompanyService) GetSeedCompaniesFromYCombinator(ctx context.Context
 		}
 		time.Sleep(5 * time.Second)
 
-		 done <- struct{}{}
+		done <- struct{}{}
 
 		//naviagte back to main page
 		if _, err := page.Goto(yc.URL, playwright.PageGotoOptions{
 			WaitUntil: playwright.WaitUntilStateDomcontentloaded,
 		}); err != nil {
-			slog.Error("error navigating back", slog.Any("error", err))
+			logger.Error().Err(err).Msg("error navigating back")
 			break
 		}
 
@@ -233,7 +221,7 @@ func (s *SeedCompanyService) GetSeedCompaniesFromYCombinator(ctx context.Context
 
 		count, _ = locator.Count()
 		if count == 0 {
-			slog.Warn("No nodes after re-navigation")
+			logger.Warn().Msg("No nodes after re-navigation")
 			break
 		}
 	}
@@ -247,7 +235,7 @@ func (s *SeedCompanyService) UploadSeedCompanyToChannel(scraper *interfaces.Scra
 	var processedCount atomic.Int32
 
 	if searchEngineKey == "" {
-		slog.Error("searchEngineKey is empty, skipping search")
+		logger.Error().Msg("searchEngineKey is empty, skipping search")
 		return
 	}
 
@@ -256,15 +244,15 @@ func (s *SeedCompanyService) UploadSeedCompanyToChannel(scraper *interfaces.Scra
 		searchWg.Add(1)
 		go func(workerID int) {
 			defer searchWg.Done()
-			slog.Info("starting goroutine for search scraper in uploadSeedCompanyToChannel func by", slog.Int("id", workerID))
+			logger.Info().Int("id", workerID).Msg("starting goroutine for search scraper in uploadSeedCompanyToChannel func by")
 			for name := range scraper.NamesChanClient.NamesChan {
 				// Check if we've reached the limit
 				if processedCount.Load() >= maxCompanies {
-					slog.Info("Reached maximum company limit, stopping PeerList processing", slog.Int("worker", workerID), slog.Int("processed", int(processedCount.Load())))
+					logger.Info().Int("worker", workerID).Int("processed", int(processedCount.Load())).Msg("Reached maximum company limit, stopping PeerList processing")
 					return
 				}
 				if scraper.Search == nil {
-					slog.Error("Search client is nil")
+					logger.Error().Msg("Search client is nil")
 					continue
 				}
 
@@ -273,20 +261,16 @@ func (s *SeedCompanyService) UploadSeedCompanyToChannel(scraper *interfaces.Scra
 				)
 
 				if err != nil {
-					scraper.Err.Send(models.WorkerError{
-						WorkerId: workerID,
-						Message:  "error searching google",
-						Err:      err,
-					})
+					logger.Error().Err(err).Int("worker_id", workerID).Msg("error searching google")
 					continue
 				}
 
 				if result == "" {
-					slog.Warn("empty result, skipping", slog.String("name", name))
+					logger.Warn().Str("name", name).Msg("empty result, skipping")
 					continue
 				}
 
-				slog.Info("company url in peerlist", slog.String("url", result))
+				logger.Info().Str("url", result).Msg("company url in peerlist")
 
 				// Increment counter
 				processedCount.Add(1)
@@ -298,11 +282,11 @@ func (s *SeedCompanyService) UploadSeedCompanyToChannel(scraper *interfaces.Scra
 					<-done
 					scrapedJobResults, err := getJobResults(scraper.Browser, url)
 					if err != nil {
-						slog.Error("❌ FAILED to scrape jobs (likely no careers page)", slog.String("company", companyName), slog.String("url", url), slog.Any("error", err))
+						logger.Error().Str("company", companyName).Str("url", url).Err(err).Msg("FAILED to scrape jobs (likely no careers page)")
 						return
 					}
 					repository.UpsertJob(scraper.DbClient.GetDB(), id, scrapedJobResults)
-					slog.Info("✅ SUCCESS: Upserted jobs", slog.String("company", companyName), slog.Int("job_count", len(scrapedJobResults)))
+					logger.Info().Str("company", companyName).Int("job_count", len(scrapedJobResults)).Msg("SUCCESS: Upserted jobs")
 				}(scrId, result, name)
 
 				time.Sleep(5 * time.Second)
@@ -323,11 +307,7 @@ func (s *SeedCompanyService) UploadSeedCompanyToChannel(scraper *interfaces.Scra
 func CreateSeedCompanyRepo(name string, url string, workerID int, scraper interfaces.ScraperClient) uint {
 	scr := repository.CreateSeedCompanyRepository(name, url)
 	if err := repository.CreateSeedCompany(scr, scraper.DbClient.GetDB()); err != nil {
-		scraper.Err.Send(models.WorkerError{
-			WorkerId: workerID,
-			Message:  "error creating seed company in DB",
-			Err:      err,
-		})
+		logger.Error().Err(err).Int("worker_id", workerID).Msg("error creating seed company in DB")
 	}
 	return scr.ID
 }

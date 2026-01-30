@@ -2,8 +2,8 @@ package repository
 
 import (
 	"fmt"
-	"log/slog"
 
+	"github.com/chandhuDev/JobLoop/internal/logger"
 	"github.com/chandhuDev/JobLoop/internal/schema"
 	"gorm.io/gorm"
 )
@@ -52,7 +52,7 @@ func CreateSeedCompany(seedCompany *schema.SeedCompany, DB *gorm.DB) error {
 		return newRecordResult.Error
 	}
 	if seedCompany.ID == 0 {
-		slog.Error("failed to create seed company, ID is zero", slog.String("company_url", seedCompany.CompanyURL))
+		logger.Error().Str("company_url", seedCompany.CompanyURL).Msg("failed to create seed company, ID is zero")
 		return fmt.Errorf("failed to create seed company, ID is zero")
 	}
 	return nil

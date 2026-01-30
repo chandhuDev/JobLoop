@@ -3,13 +3,13 @@ package service
 import (
 	"context"
 	"io"
-	"log/slog"
 	"net/http"
 	"os"
 	"sync"
 	"time"
 
 	"github.com/chandhuDev/JobLoop/internal/interfaces"
+	"github.com/chandhuDev/JobLoop/internal/logger"
 	models "github.com/chandhuDev/JobLoop/internal/models"
 	"github.com/chandhuDev/JobLoop/internal/repository"
 	"google.golang.org/protobuf/encoding/protojson"
@@ -38,7 +38,7 @@ func CreateVisionInstance(context context.Context) (*vision.ImageAnnotatorClient
 }
 
 func (v *VisionWrapper) ExtractTextFromImage(ImageUrlArrays []string, scraper *interfaces.ScraperClient, w int, seedCompanyId uint) {
-	slog.Info("we are starting vision scraper", slog.Int("worker_id", w), slog.Int("image_count", len(ImageUrlArrays)))
+	logger.Info().Int("worker_id", w).Int("image_count", len(ImageUrlArrays)).Msg("starting vision scraper")
 
 	var requests []*visionpb.AnnotateImageRequest
 	var validURLs []string
@@ -49,13 +49,10 @@ func (v *VisionWrapper) ExtractTextFromImage(ImageUrlArrays []string, scraper *i
 	// 	testURL,
 	// }
 	for _, imageURL := range ImageUrlArrays {
-        imageBytes, err := downloadImage(imageURL)
-		slog.Info("successfully read bytes from image", slog.String("url", imageURL))
+		imageBytes, err := downloadImage(imageURL)
+		logger.Info().Str("url", imageURL).Msg("successfully read bytes from image")
 		if err != nil {
-			slog.Warn("Failed to download image",
-				slog.String("url", imageURL),
-				slog.Any("error", err),
-			)
+			logger.Warn().Str("url", imageURL).Err(err).Msg("Failed to download image")
 			continue
 		}
 
@@ -76,7 +73,7 @@ func (v *VisionWrapper) ExtractTextFromImage(ImageUrlArrays []string, scraper *i
 		validURLs = append(validURLs, imageURL)
 
 		if len(requests) == 0 {
-			slog.Warn("No valid images to process")
+			logger.Warn().Msg("No valid images to process")
 		}
 
 		batchReq := &visionpb.BatchAnnotateImagesRequest{
@@ -88,20 +85,17 @@ func (v *VisionWrapper) ExtractTextFromImage(ImageUrlArrays []string, scraper *i
 
 		resp, err := v.Vision.VisionClient.BatchAnnotateImages(ctx, batchReq)
 		if err != nil {
-			scraper.Err.Send(models.WorkerError{
-				WorkerId: w,
-				Message:  "Error in vision API request",
-				Err:      err,
-			})
+			logger.Error().Err(err).Int("worker_id", w).Msg("Error in vision API request")
+			return
 		}
 		if resp == nil || len(resp.Responses) == 0 {
-			slog.Warn("No responses from vision API")
+			logger.Warn().Msg("No responses from vision API")
 			return
 		}
 		var resultsArray []string
 		for _, r := range resp.Responses {
 			if r.Error != nil {
-				slog.Error("Vision error", slog.String("msg", r.Error.Message))
+				logger.Error().Str("msg", r.Error.Message).Msg("Vision error")
 				continue
 			}
 
@@ -114,11 +108,11 @@ func (v *VisionWrapper) ExtractTextFromImage(ImageUrlArrays []string, scraper *i
 				v.Vision.NamesChan.NamesChan <- LastWord(text)
 			}
 		}(resultsArray)
-		
+
 		if err := repository.BulkUpsertTestimonials(scraper.DbClient.GetDB(), seedCompanyId, resultsArray); err != nil {
-			slog.Error("error upserting testimonial images", slog.Any("error", err))
+			logger.Error().Err(err).Msg("error upserting testimonial images")
 		}
-		slog.Info("vision processing completed", slog.Int("worker_id", w), slog.Int("results", len(resultsArray)))
+		logger.Info().Int("worker_id", w).Int("results", len(resultsArray)).Msg("vision processing completed")
 	}
 
 }
@@ -134,14 +128,14 @@ func saveFullResponseToJSON(resp *visionpb.BatchAnnotateImagesResponse, urls []s
 	}.Marshal(resp)
 
 	if err != nil {
-		slog.Error("Failed to marshal response", slog.Any("error", err))
+		logger.Error().Err(err).Msg("Failed to marshal response")
 		return
 	}
 
 	// Append to file
 	f, err := os.OpenFile("vision_results.json", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
-		slog.Error("Failed to open file", slog.Any("error", err))
+		logger.Error().Err(err).Msg("Failed to open file")
 		return
 	}
 	defer f.Close()
@@ -149,7 +143,7 @@ func saveFullResponseToJSON(resp *visionpb.BatchAnnotateImagesResponse, urls []s
 	f.Write(jsonBytes)
 	f.WriteString("\n---\n") // Separator between batches
 
-	slog.Info("Saved full response to JSON")
+	logger.Info().Msg("Saved full response to JSON")
 }
 
 func downloadImage(imageURL string) ([]byte, error) {

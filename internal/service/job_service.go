@@ -2,7 +2,6 @@ package service
 
 import (
 	"fmt"
-	"log/slog"
 	"net/url"
 	"strings"
 	"time"
@@ -10,6 +9,7 @@ import (
 	"github.com/playwright-community/playwright-go"
 
 	"github.com/chandhuDev/JobLoop/internal/interfaces"
+	"github.com/chandhuDev/JobLoop/internal/logger"
 	"github.com/chandhuDev/JobLoop/internal/models"
 )
 
@@ -53,7 +53,7 @@ func ScrapeJobs(browser interfaces.BrowserClient, companyURL string) ([]models.L
 		return nil, fmt.Errorf("invalid company URL: %w", err)
 	}
 
-	fmt.Println("🏠 Homepage:", companyURL)
+	logger.Info().Str("homepage", companyURL).Msg("Homepage")
 
 	resp, err := page.Goto(companyURL, playwright.PageGotoOptions{
 		WaitUntil: playwright.WaitUntilStateDomcontentloaded,
@@ -64,7 +64,7 @@ func ScrapeJobs(browser interfaces.BrowserClient, companyURL string) ([]models.L
 	}
 
 	if resp != nil {
-		slog.Info("Homepage response", slog.Int("status", resp.Status()), slog.String("url", resp.URL()))
+		logger.Info().Int("status", resp.Status()).Str("url", resp.URL()).Msg("Homepage response")
 	}
 
 	page.WaitForLoadState(playwright.PageWaitForLoadStateOptions{
@@ -77,7 +77,7 @@ func ScrapeJobs(browser interfaces.BrowserClient, companyURL string) ([]models.L
 
 	// Fallback: try common career paths if no link found
 	if careersURL == "" {
-		slog.Info("No careers link found, trying common paths")
+		logger.Info().Msg("No careers link found, trying common paths")
 		careersURL = tryCommonCareerPaths(page, baseURL)
 	}
 
@@ -85,7 +85,7 @@ func ScrapeJobs(browser interfaces.BrowserClient, companyURL string) ([]models.L
 		return nil, fmt.Errorf("no careers/jobs page found")
 	}
 
-	fmt.Println("➡️ Careers page:", careersURL)
+	logger.Info().Str("careers_page", careersURL).Msg("Careers page")
 
 	resp, err = page.Goto(careersURL, playwright.PageGotoOptions{
 		Timeout: playwright.Float(30000),
@@ -95,7 +95,7 @@ func ScrapeJobs(browser interfaces.BrowserClient, companyURL string) ([]models.L
 	}
 
 	if resp != nil {
-		slog.Info("Careers page response", slog.Int("status", resp.Status()), slog.String("url", resp.URL()))
+		logger.Info().Int("status", resp.Status()).Str("url", resp.URL()).Msg("Careers page response")
 		if resp.Status() >= 400 {
 			return nil, fmt.Errorf("careers page returned status %d", resp.Status())
 		}
@@ -108,21 +108,21 @@ func ScrapeJobs(browser interfaces.BrowserClient, companyURL string) ([]models.L
 	/* ---------- FIND CTA LINKS FIRST ---------- */
 
 	ctas := findCTAs(page)
-	fmt.Printf("📋 Found %d CTA buttons\n", len(ctas))
+	logger.Info().Int("cta_count", len(ctas)).Msg("Found CTA buttons")
 
 	/* ---------- HANDLE EACH CTA ---------- */
 
 	for _, cta := range ctas {
-		fmt.Println("➡️ CTA:", cta.Text, "|", cta.RawHref)
+		logger.Info().Str("cta_text", cta.Text).Str("cta_href", cta.RawHref).Msg("CTA")
 
 		if strings.HasPrefix(cta.RawHref, "#") {
-			fmt.Println("ℹ️ Hash CTA detected — scraping current page only")
+			logger.Info().Msg("Hash CTA detected - scraping current page only")
 
 			jobs := scanForJobs(page)
 			jobs = dedupeJobs(jobs)
 
 			if len(jobs) > 0 {
-				fmt.Println("🎯 Jobs found on careers page (hash CTA)")
+				logger.Info().Msg("Jobs found on careers page (hash CTA)")
 				logJobs(jobs)
 				return jobs, nil
 			}
@@ -131,13 +131,13 @@ func ScrapeJobs(browser interfaces.BrowserClient, companyURL string) ([]models.L
 		}
 
 		target := resolveURL(cta.RawHref, baseURL)
-		fmt.Println("🌐 Navigating CTA URL:", target)
+		logger.Info().Str("cta_url", target).Msg("Navigating CTA URL")
 
 		_, err = page.Goto(target, playwright.PageGotoOptions{
 			Timeout: playwright.Float(30000),
 		})
 		if err != nil {
-			slog.Warn("Failed to navigate to CTA", slog.String("url", target), slog.Any("error", err))
+			logger.Warn().Str("url", target).Err(err).Msg("Failed to navigate to CTA")
 			continue
 		}
 
@@ -147,7 +147,7 @@ func ScrapeJobs(browser interfaces.BrowserClient, companyURL string) ([]models.L
 		jobs = dedupeJobs(jobs)
 
 		if len(jobs) > 0 {
-			fmt.Println("🎯 Jobs found via CTA")
+			logger.Info().Msg("Jobs found via CTA")
 			logJobs(jobs)
 			return jobs, nil
 		}
@@ -156,19 +156,19 @@ func ScrapeJobs(browser interfaces.BrowserClient, companyURL string) ([]models.L
 	/* ---------- FALLBACK: DIRECT SCAN IF NO CTAs ---------- */
 
 	if len(ctas) == 0 {
-		fmt.Println("ℹ️ No CTAs found, scanning careers page directly")
+		logger.Info().Msg("No CTAs found, scanning careers page directly")
 
 		jobs := scanForJobs(page)
 		jobs = dedupeJobs(jobs)
 
 		if len(jobs) > 0 {
-			fmt.Println("🎯 Jobs found directly on careers page")
+			logger.Info().Msg("Jobs found directly on careers page")
 			logJobs(jobs)
 			return jobs, nil
 		}
 	}
 
-	fmt.Println("🚫 No jobs found")
+	logger.Info().Msg("No jobs found")
 	return nil, nil
 }
 
@@ -185,7 +185,7 @@ func tryCommonCareerPaths(page playwright.Page, baseURL *url.URL) string {
 
 	for _, path := range commonPaths {
 		testURL := baseURL.Scheme + "://" + baseURL.Host + path
-		slog.Info("Trying career path", slog.String("url", testURL))
+		logger.Info().Str("url", testURL).Msg("Trying career path")
 
 		resp, err := page.Goto(testURL, playwright.PageGotoOptions{
 			Timeout: playwright.Float(10000),
@@ -195,7 +195,7 @@ func tryCommonCareerPaths(page playwright.Page, baseURL *url.URL) string {
 		}
 
 		if resp != nil && resp.Status() >= 200 && resp.Status() < 400 {
-			slog.Info("✅ Found valid career path", slog.String("url", testURL), slog.Int("status", resp.Status()))
+			logger.Info().Str("url", testURL).Int("status", resp.Status()).Msg("Found valid career path")
 			return testURL
 		}
 	}
@@ -300,7 +300,7 @@ func findCTAs(page playwright.Page) []CTA {
 /* ================= JOB SCAN ================= */
 
 func scanForJobs(page playwright.Page) []models.LinkData {
-	slog.Info("👉 ENTER scanForJobs (container-aware, text-only)")
+	logger.Info().Msg("ENTER scanForJobs (container-aware, text-only)")
 
 	page.WaitForLoadState(playwright.PageWaitForLoadStateOptions{
 		State: playwright.LoadStateNetworkidle,
@@ -317,11 +317,11 @@ func scanForJobs(page playwright.Page) []models.LinkData {
 	count, err := anchors.Count()
 
 	if err != nil || count == 0 {
-		slog.Info("No ATS iframe found, falling back to main page")
+		logger.Info().Msg("No ATS iframe found, falling back to main page")
 		anchors = page.Locator("a[href]")
 		count, _ = anchors.Count()
 	} else {
-		slog.Info("🖼️ Found ATS iframe, scanning inside", slog.Int("anchor_count", count))
+		logger.Info().Int("anchor_count", count).Msg("Found ATS iframe, scanning inside")
 	}
 
 	for i := 0; i < count; i++ {
@@ -336,7 +336,7 @@ func scanForJobs(page playwright.Page) []models.LinkData {
 			continue
 		}
 
-		slog.Debug("🔗 Processing anchor", slog.String("href", href))
+		logger.Debug().Str("href", href).Msg("Processing anchor")
 
 		// 1️⃣ Anchor text
 		text, _ := a.TextContent()
@@ -362,7 +362,7 @@ func scanForJobs(page playwright.Page) []models.LinkData {
 		}
 		seen[href] = true
 
-		slog.Info("✅ Job found", slog.String("href", href), slog.String("text", text))
+		logger.Info().Str("href", href).Str("text", text).Msg("Job found")
 
 		jobs = append(jobs, models.LinkData{
 			Text: text,
@@ -370,7 +370,7 @@ func scanForJobs(page playwright.Page) []models.LinkData {
 		})
 	}
 
-	slog.Info("📊 Jobs found after scan", slog.Int("jobs", len(jobs)))
+	logger.Info().Int("jobs", len(jobs)).Msg("Jobs found after scan")
 	return jobs
 }
 
@@ -418,14 +418,14 @@ func dedupeJobs(jobs []models.LinkData) []models.LinkData {
 }
 
 func logJobs(jobs []models.LinkData) {
-	fmt.Println("📋 Job listings:")
+	logger.Info().Msg("Job listings:")
 	for i, job := range jobs {
-		fmt.Printf("  %d. %s\n     %s\n", i+1, job.Text, job.URL)
+		logger.Info().Int("number", i+1).Str("text", job.Text).Str("url", job.URL).Msg("Job listing")
 	}
 }
 
 func toJSArray(arr []string) string {
-	slog.Info("converting to JS array in toJSArray func")
+	logger.Info().Msg("converting to JS array in toJSArray func")
 	q := make([]string, len(arr))
 	for i, s := range arr {
 		q[i] = `"` + s + `"`
@@ -434,7 +434,7 @@ func toJSArray(arr []string) string {
 }
 
 func parseJobs(res interface{}) []models.LinkData {
-	slog.Info("we are in parseJobs func")
+	logger.Info().Msg("we are in parseJobs func")
 	var out []models.LinkData
 	arr, ok := res.([]interface{})
 	if !ok {
@@ -447,7 +447,7 @@ func parseJobs(res interface{}) []models.LinkData {
 			Text: toString(m["text"]),
 			URL:  toString(m["href"]),
 		})
-		slog.Debug("Found job", slog.String("text", toString(m["text"])), slog.String("url", toString(m["href"])))
+		logger.Debug().Str("text", toString(m["text"])).Str("url", toString(m["href"])).Msg("Found job")
 	}
 	return out
 }
@@ -460,7 +460,7 @@ func toString(v interface{}) string {
 }
 
 func resolveURL(href string, base *url.URL) string {
-	slog.Info("resolving URL", href)
+	logger.Info().Str("href", href).Msg("resolving URL")
 	u, err := url.Parse(href)
 	if err != nil {
 		return href

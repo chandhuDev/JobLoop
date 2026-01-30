@@ -3,9 +3,9 @@ package service
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"os"
 
+	"github.com/chandhuDev/JobLoop/internal/logger"
 	models "github.com/chandhuDev/JobLoop/internal/models"
 	"google.golang.org/api/customsearch/v1"
 	"google.golang.org/api/option"
@@ -40,17 +40,17 @@ func (s *SearchService) SearchKeyWordInGoogle(name string, i int, key string) (s
 
 	v, err := s.Search.SearchClient.Cse.List().Q(name).Cx(key).Do()
 	if err != nil {
-		slog.Error("search API error", slog.Any("error", err), slog.String("name", name))
+		logger.Error().Err(err).Str("name", name).Msg("search API error")
 		return "", err
 	}
 
 	if v == nil || len(v.Items) == 0 {
-		slog.Warn("no search results found", slog.String("name", name))
+		logger.Warn().Str("name", name).Msg("no search results found")
 		return "", fmt.Errorf("no results found for %s", name)
 	}
 
 	url := v.Items[0].DisplayLink
-	slog.Info("search results", slog.String("url", url), slog.Int("workerId", i))
+	logger.Info().Str("url", url).Int("workerId", i).Msg("search results")
 
 	return url, nil
 }
