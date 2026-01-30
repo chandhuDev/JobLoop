@@ -3,13 +3,13 @@ package main
 import (
 	"context"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
-	// "time"
-
-	//  dbService "github.com/chandhuDev/JobLoop/internal/database"
+	dbService "github.com/chandhuDev/JobLoop/internal/database"
 	models "github.com/chandhuDev/JobLoop/internal/models"
 	service "github.com/chandhuDev/JobLoop/internal/service"
 	"github.com/joho/godotenv"
@@ -62,18 +62,18 @@ func run(ctx context.Context) int {
 	defer errInstance.Close()
 
 	// Database
-	// dbInstance := dbService.ConnectDatabase()
-	// if dbInstance == nil {
-	// 	slog.Error("failed to connect to database")
-	// 	return 1
-	// }
-	// dbSvc := &dbService.DatabaseService{DB: dbInstance}
-	// defer dbSvc.Close()
+	dbInstance := dbService.ConnectDatabase()
+	if dbInstance == nil {
+		slog.Error("failed to connect to database")
+		return 1
+	}
+	dbSvc := &dbService.DatabaseService{DB: dbInstance}
+	defer dbSvc.Close()
 
-	// if err := dbSvc.CreateSchema(); err != nil {
-	// 	slog.Error("error creating schema", slog.Any("error", err))
-	// 	return 1
-	// }
+	if err := dbSvc.CreateSchema(); err != nil {
+		slog.Error("error creating schema", slog.Any("error", err))
+		return 1
+	}
 
 	// Browser
 	browserOptions := models.Options{
@@ -135,43 +135,66 @@ func run(ctx context.Context) int {
 
 	abcdChan := make(chan models.SeedCompanyResult, 30)
 
-	// service.ScrapeJobs(scraperClient.Browser, "http://www.checkr.com")
+	service.ScrapeJobs(scraperClient.Browser, "http://www.checkr.com")
 
-	// SeedCompanyConfigs := []models.SeedCompany{
-	// 	{
-	// 		Name:     "Y Combinator",
-	// 		URL:      "http://www.ycombinator.com/companies",
-	// 		Selector: `a[href^="/companies/"]`,
-	// 		WaitTime: 3 * time.Second,
-	// 	},
-	// 	{
-	// 		Name:     "Peer list",
-	// 		URL:      "https://peerlist.io/jobs",
-	// 		Selector: `a[href^="/company/"][href*="/careers/"]`,
-	// 		WaitTime: 3 * time.Second,
-	// 	},
-	// }
+	SeedCompanyConfigs := []models.SeedCompany{
+		{
+			Name:     "Y Combinator",
+			URL:      "http://www.ycombinator.com/companies",
+			Selector: `a[href^="/companies/"]`,
+			WaitTime: 3 * time.Second,
+		},
+		{
+			Name:     "Peer list",
+			URL:      "https://peerlist.io/jobs",
+			Selector: `a[href^="/company/"][href*="/careers/"]`,
+			WaitTime: 3 * time.Second,
+		},
+	}
 
-	// seedCompanyFirst := service.NewSeedCompanyScraper(SeedCompanyConfigs[0])
-	// seedCompanySecond := service.NewSeedCompanyScraper(SeedCompanyConfigs[1])
-	// seedCompanyArrayInstance := service.NewSeedCompanyArray(*seedCompanyFirst, *seedCompanySecond)
-	// seedCompany := service.SeedCompanyService{SeedCompany: seedCompanyArrayInstance}
+	seedCompanyFirst := service.NewSeedCompanyScraper(SeedCompanyConfigs[0])
+	seedCompanySecond := service.NewSeedCompanyScraper(SeedCompanyConfigs[1])
+	seedCompanyArrayInstance := service.NewSeedCompanyArray(*seedCompanyFirst, *seedCompanySecond)
+	seedCompany := service.SeedCompanyService{SeedCompany: seedCompanyArrayInstance}
 
 	testimonialConfig := service.NewTestimonial()
 	testimonial := service.TestimonialService{Testimonial: testimonialConfig}
 
+	httpHandler := service.NewHTTPHandlerService(dbSvc.DB)
+	server := &http.Server{
+		Addr:    ":8081",
+		Handler: httpHandler,
+	}
+
 	g, gCtx := errgroup.WithContext(ctx)
 
-	// g.Go(func() error {
-	// 	defer func() {
-	// 		if r := recover(); r != nil {
-	// 			slog.Error("Panic in SeedCompany", slog.Any("error", r))
-	// 		}
-	// 	}()
-	// 	seedCompany.SeedCompanyConfigs(gCtx, scraperClient)
-	// 	slog.Info("SeedCompany finished")
-	// 	return nil
-	// })
+	g.Go(func() error {
+		slog.Info("Starting HTTP server", slog.String("addr", server.Addr))
+		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			return err
+		}
+		return nil
+	})
+
+	g.Go(func() error {
+		<-gCtx.Done()
+		slog.Info("Shutting down HTTP server...")
+		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer shutdownCancel()
+		return server.Shutdown(shutdownCtx)
+	})
+
+	g.Go(func() error {
+		defer func() {
+			if r := recover(); r != nil {
+				slog.Error("Panic in SeedCompany", slog.Any("error", r))
+			}
+		}()
+		seedCompany.SeedCompanyConfigs(gCtx, scraperClient)
+		slog.Info("SeedCompany finished")
+		return nil
+	})
+
 	g.Go(func() error {
 		defer func() {
 			if r := recover(); r != nil {
@@ -188,8 +211,8 @@ func run(ctx context.Context) int {
 	})
 
 	abcdChan <- models.SeedCompanyResult{
-		CompanyName: "precisely",
-		CompanyURL:  "https://www.precisely.com/",
+		CompanyName:   "precisely",
+		CompanyURL:    "https://www.precisely.com/",
 		SeedCompanyId: 1,
 	}
 
