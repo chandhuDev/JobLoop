@@ -50,11 +50,12 @@ func (s *SeedCompanyService) SeedCompanyConfigs(ctx context.Context, scraper *in
 		default:
 		}
 		if s.SeedCompany.Companies[i].Name == "Peer list" {
-			s.SeedCompany.PWg.Add(1)
-			go func(sp models.SeedCompany) {
-				defer s.SeedCompany.PWg.Done()
-				s.GetSeedCompaniesFromPeerList(scraper, &sp, ctx)
-			}(s.SeedCompany.Companies[i])
+			// s.SeedCompany.PWg.Add(1)
+			// go func(sp models.SeedCompany) {
+			// 	defer s.SeedCompany.PWg.Done()
+			// 	s.GetSeedCompaniesFromPeerList(scraper, &sp, ctx)
+			// }(s.SeedCompany.Companies[i])
+			logger.Info().Msg("Skipping PeerList scraper as it's currently disabled")
 		} else {
 			s.SeedCompany.YCWg.Add(1)
 			go func(yc models.SeedCompany) {
@@ -119,15 +120,17 @@ func (s *SeedCompanyService) GetSeedCompaniesFromPeerList(scraper *interfaces.Sc
 func (s *SeedCompanyService) GetSeedCompaniesFromYCombinator(ctx context.Context, scraper *interfaces.ScraperClient, yc *models.SeedCompany) {
 	logger.Info().Msg("worker started for ycombinator")
 
-	const maxCompanies = 50
+	 const maxCompanies = 10
 	var processedCount atomic.Int32
 
+	logger.Info().Msg("START processing for ycombinator")
 	page, err := scraper.Browser.RunInNewTab()
 	if err != nil {
 		logger.Error().Err(err).Msg("error creating page for ycombinator")
 		return
 	}
 	defer page.Close()
+	logger.Info().Msg("START processing for ycombinator by running new tab")
 
 	if _, err := page.Goto(yc.URL, playwright.PageGotoOptions{
 		WaitUntil: playwright.WaitUntilStateDomcontentloaded,
@@ -231,8 +234,8 @@ func (s *SeedCompanyService) UploadSeedCompanyToChannel(scraper *interfaces.Scra
 	var searchWg sync.WaitGroup
 	var searchEngineKey = os.Getenv("GOOGLE_SEARCH_ENGINE")
 
-	const maxCompanies = 10
-	var processedCount atomic.Int32
+	const maxCompanies = 15
+	 var processedCount atomic.Int32
 
 	if searchEngineKey == "" {
 		logger.Error().Msg("searchEngineKey is empty, skipping search")
@@ -273,7 +276,7 @@ func (s *SeedCompanyService) UploadSeedCompanyToChannel(scraper *interfaces.Scra
 				logger.Info().Str("url", result).Msg("company url in peerlist")
 
 				// Increment counter
-				processedCount.Add(1)
+				 processedCount.Add(1)
 
 				scrId := CreateSeedCompanyRepo(name, result, workerID, *scraper)
 

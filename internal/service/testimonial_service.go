@@ -29,8 +29,8 @@ func NewTestimonial() *models.Testimonial {
 func (t *TestimonialService) ScrapeTestimonial(
 	ctx context.Context,
 	scraper *interfaces.ScraperClient,
-	dupChan <-chan models.SeedCompanyResult,
-	// scChan <-chan models.SeedCompanyResult,
+	// dupChan <-chan models.SeedCompanyResult,
+	 scChan <-chan models.SeedCompanyResult,
 	vision VisionWrapper,
 ) {
 	numTestimonialWorkers := 2
@@ -59,7 +59,7 @@ func (t *TestimonialService) ScrapeTestimonial(
 				case <-ctx.Done():
 					logger.Info().Int("worker_id", workerID).Msg("Testimonial worker stopping (context cancelled)")
 					return
-				case scr, ok := <-dupChan:
+				case scr, ok := <-scChan:
 					if !ok {
 						logger.Info().Int("worker_id", workerID).Msg("Testimonial worker stopping (channel closed)")
 						return
@@ -110,7 +110,7 @@ func (t *TestimonialService) ScrapeTestimonial(
 						logger.Info().Str("url", url).Msg("Extracting text from image")
 					}
 
-					//  vision.ExtractTextFromImage(job.URL, scraper, workerID, job.SeedCompanyId)
+					 vision.ExtractTextFromImage(job.URL, scraper, workerID, job.SeedCompanyId)
 				}
 			}
 		}(i)

@@ -12,7 +12,7 @@ import (
 	"github.com/chandhuDev/JobLoop/internal/logger"
 	models "github.com/chandhuDev/JobLoop/internal/models"
 	service "github.com/chandhuDev/JobLoop/internal/service"
-	"github.com/joho/godotenv"
+	 "github.com/joho/godotenv"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -53,7 +53,6 @@ func main() {
 }
 
 func run(ctx context.Context) int {
-
 
 	// Database
 	dbInstance := dbService.ConnectDatabase()
@@ -114,10 +113,9 @@ func run(ctx context.Context) int {
 	// Scraper client
 	scraperClient := service.SetUpScraperClient(
 		browserInstance,
-
 		visionInstance,
 		search,
-		// dbSvc,
+		dbSvc,
 		namesChannel.ReturnNamesChan(),
 	)
 
@@ -126,16 +124,16 @@ func run(ctx context.Context) int {
 		return 1
 	}
 
-	abcdChan := make(chan models.SeedCompanyResult, 30)
+	// abcdChan := make(chan models.SeedCompanyResult, 30)
 
-	service.ScrapeJobs(scraperClient.Browser, "http://www.checkr.com")
+	// service.ScrapeJobs(scraperClient.Browser, "http://www.checkr.com")
 
 	SeedCompanyConfigs := []models.SeedCompany{
 		{
 			Name:     "Y Combinator",
 			URL:      "http://www.ycombinator.com/companies",
 			Selector: `a[href^="/companies/"]`,
-			WaitTime: 3 * time.Second,
+			WaitTime: 10 * time.Second,
 		},
 		{
 			Name:     "Peer list",
@@ -155,7 +153,7 @@ func run(ctx context.Context) int {
 
 	httpHandler := service.NewHTTPHandlerService(dbSvc.DB)
 	server := &http.Server{
-		Addr:    ":5000",
+		Addr:    ":5001",
 		Handler: httpHandler,
 	}
 
@@ -192,22 +190,22 @@ func run(ctx context.Context) int {
 		defer func() {
 			if r := recover(); r != nil {
 				logger.Error().Interface("error", r).Msg("Panic in Testimonial")
-				close(abcdChan)
+				// close(abcdChan)
 			}
 		}()
 		testimonial.ScrapeTestimonial(gCtx, scraperClient,
-			// seedCompany.SeedCompany.ResultChan,
-			abcdChan,
+			seedCompany.SeedCompany.ResultChan,
+			// abcdChan,
 			*visionWrapper)
 		logger.Info().Msg("Testimonial finished")
 		return nil
 	})
 
-	abcdChan <- models.SeedCompanyResult{
-		CompanyName:   "precisely",
-		CompanyURL:    "https://www.precisely.com/",
-		SeedCompanyId: 1,
-	}
+	// abcdChan <- models.SeedCompanyResult{
+	// 	CompanyName:   "precisely",
+	// 	CompanyURL:    "https://www.precisely.com/",
+	// 	SeedCompanyId: 1,
+	// }
 
 	if err := g.Wait(); err != nil {
 		logger.Error().Err(err).Msg("Error in errgroup")

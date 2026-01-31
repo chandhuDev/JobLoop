@@ -18,10 +18,11 @@ type DatabaseService struct {
 
 func ConnectDatabase() *models.Database {
 	user := os.Getenv("DB_USER")
-	pass := os.Getenv("DB_PASS")
+	pass := os.Getenv("DB_PASSWORD")
 
 	dsn := fmt.Sprintf(
-		"host=localhost user=%s password=%s dbname=jobloop sslmode=disable",
+		"host=%s user=%s password=%s dbname=jobloop sslmode=disable",
+		os.Getenv("DB_LOCAL_HOST"),
 		user, pass,
 	)
 

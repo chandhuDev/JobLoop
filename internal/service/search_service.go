@@ -38,7 +38,7 @@ func (s *SearchService) SearchKeyWordInGoogle(name string, i int, key string) (s
 		return "", fmt.Errorf("search engine key is empty")
 	}
 
-	v, err := s.Search.SearchClient.Cse.List().Q(name).Cx(key).Do()
+	v, err := s.Search.SearchClient.Cse.List().Q(name + "company official website").Cx(key).Do()
 	if err != nil {
 		logger.Error().Err(err).Str("name", name).Msg("search API error")
 		return "", err

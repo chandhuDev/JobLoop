@@ -6,3 +6,5 @@ tests/
 docker-compose.yaml
 dockerfile
 credentials/
+logs/
+build.log
