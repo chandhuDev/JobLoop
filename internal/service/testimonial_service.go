@@ -29,8 +29,7 @@ func NewTestimonial() *models.Testimonial {
 func (t *TestimonialService) ScrapeTestimonial(
 	ctx context.Context,
 	scraper *interfaces.ScraperClient,
-	// dupChan <-chan models.SeedCompanyResult,
-	 scChan <-chan models.SeedCompanyResult,
+	scChan <-chan models.SeedCompanyResult,
 	vision VisionWrapper,
 ) {
 	numTestimonialWorkers := 2
@@ -110,28 +109,21 @@ func (t *TestimonialService) ScrapeTestimonial(
 						logger.Info().Str("url", url).Msg("Extracting text from image")
 					}
 
-					 vision.ExtractTextFromImage(job.URL, scraper, workerID, job.SeedCompanyId)
+					vision.ExtractTextFromImage(job.URL, scraper, workerID, job.SeedCompanyId)
 				}
 			}
 		}(i)
 	}
 
-	// Wait for testimonial workers, then close image channel
 	t.Testimonial.TestimonialWg.Wait()
 	logger.Info().Msg("All testimonial workers finished, closing image channel")
 	close(t.Testimonial.ImageResultChan)
 
-	// Wait for image workers
 	t.Testimonial.ImageWg.Wait()
 	logger.Info().Msg("All image workers finished")
 }
 
-func (t *TestimonialService) scrapeCompany(
-	ctx context.Context,
-	page playwright.Page,
-	scr models.SeedCompanyResult,
-) []string {
-
+func (t *TestimonialService) scrapeCompany(ctx context.Context, page playwright.Page, scr models.SeedCompanyResult) []string {
 	select {
 	case <-ctx.Done():
 		return nil
@@ -170,7 +162,7 @@ func (t *TestimonialService) scrapeCompany(
 	_, err = page.WaitForFunction(`
 		() => document.body && document.body.children.length > 0
 	`, playwright.PageWaitForFunctionOptions{
-		Timeout: playwright.Float(10000),
+		Timeout: playwright.Float(30000),
 	})
 	if err != nil {
 		logger.Error().Err(err).Msg("DOM never became ready")

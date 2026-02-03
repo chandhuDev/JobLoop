@@ -12,7 +12,7 @@ import (
 	"github.com/chandhuDev/JobLoop/internal/logger"
 	models "github.com/chandhuDev/JobLoop/internal/models"
 	service "github.com/chandhuDev/JobLoop/internal/service"
-	 "github.com/joho/godotenv"
+	"github.com/joho/godotenv"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -85,27 +85,15 @@ func run(ctx context.Context) int {
 		logger.Info().Msg("Browser closed")
 	}()
 
-	searchInstance, err := service.CreateSearchService(ctx)
-	if err != nil {
-		logger.Error().Err(err).Msg("error creating search service")
-		return 1
-	}
+	searchInstance := service.CreateSearchService()
+
 	searchConfig := service.SetUpSearch(searchInstance)
-	search := &service.SearchService{Search: searchConfig}
+	search := &service.SearchService{Client: searchConfig}
 
 	namesChannel := service.CreateNamesChannel(200)
 	defer namesChannel.CloseNamesChan()
 
-	visionInstance, err := service.CreateVisionInstance(ctx)
-	if err != nil {
-		logger.Error().Err(err).Msg("error creating vision service")
-		return 1
-	}
-	defer func() {
-		logger.Info().Msg("Closing vision client...")
-		visionInstance.Close()
-		logger.Info().Msg("Vision client closed")
-	}()
+	visionInstance := service.CreateVisionInstance()
 
 	visionConfig := service.SetUpVision(visionInstance, ctx, namesChannel.ReturnNamesChan())
 	visionWrapper := &service.VisionWrapper{Vision: visionConfig}
@@ -123,10 +111,6 @@ func run(ctx context.Context) int {
 		logger.Error().Msg("scraper client not properly initialized")
 		return 1
 	}
-
-	// abcdChan := make(chan models.SeedCompanyResult, 30)
-
-	// service.ScrapeJobs(scraperClient.Browser, "http://www.checkr.com")
 
 	SeedCompanyConfigs := []models.SeedCompany{
 		{
@@ -195,17 +179,10 @@ func run(ctx context.Context) int {
 		}()
 		testimonial.ScrapeTestimonial(gCtx, scraperClient,
 			seedCompany.SeedCompany.ResultChan,
-			// abcdChan,
 			*visionWrapper)
 		logger.Info().Msg("Testimonial finished")
 		return nil
 	})
-
-	// abcdChan <- models.SeedCompanyResult{
-	// 	CompanyName:   "precisely",
-	// 	CompanyURL:    "https://www.precisely.com/",
-	// 	SeedCompanyId: 1,
-	// }
 
 	if err := g.Wait(); err != nil {
 		logger.Error().Err(err).Msg("Error in errgroup")

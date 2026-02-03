@@ -19,5 +19,4 @@ type TestimonialImageResult struct {
 
 type TestimonialResult struct {
 	Name string
-	// Uri  string
 }

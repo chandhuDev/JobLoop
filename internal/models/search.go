@@ -1,9 +1,9 @@
 package models
 
 import (
-	"google.golang.org/api/customsearch/v1"
+	"github.com/anthropics/anthropic-sdk-go"
 )
 
 type Search struct {
-	SearchClient *customsearch.Service
+	Search *anthropic.Client
 }

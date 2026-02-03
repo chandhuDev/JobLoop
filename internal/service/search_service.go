@@ -4,53 +4,124 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 
-	"github.com/chandhuDev/JobLoop/internal/logger"
-	models "github.com/chandhuDev/JobLoop/internal/models"
-	"google.golang.org/api/customsearch/v1"
-	"google.golang.org/api/option"
+	"github.com/anthropics/anthropic-sdk-go"
+	"github.com/anthropics/anthropic-sdk-go/option"
+	"github.com/chandhuDev/JobLoop/internal/models"
 )
 
 type SearchService struct {
-	Search *models.Search
+	Client *models.Search
 }
 
-func SetUpSearch(search *customsearch.Service) *models.Search {
+type SearchResult struct {
+	CompanyName string
+	URL         string
+	Error       error
+}
+
+type SearchBatchResult struct {
+	CustomID string `json:"custom_id"`
+	Result   struct {
+		Type    string `json:"type"`
+		Message struct {
+			Content []struct {
+				Type string `json:"type"`
+				Text string `json:"text"`
+			} `json:"content"`
+		} `json:"message"`
+		Error struct {
+			Type    string `json:"type"`
+			Message string `json:"message"`
+		} `json:"error"`
+	} `json:"result"`
+}
+
+func CreateSearchService() *anthropic.Client {
+	client := anthropic.NewClient(
+		option.WithAPIKey(os.Getenv("ANTHROPIC_API_KEY")),
+	)
+	return &client
+}
+
+func SetUpSearch(client *anthropic.Client) *models.Search {
 	return &models.Search{
-		SearchClient: search,
+		Search: client,
 	}
 }
 
-func CreateSearchService(context context.Context) (*customsearch.Service, error) {
-	apiKey := os.Getenv("GOOGLE_API_KEY")
+func (s *SearchService) SearchKeyword(companyName string, workerId int) (string, error) {
 
-	customsearchService, err := customsearch.NewService(context, option.WithAPIKey(apiKey))
-
-	return customsearchService, err
-}
-
-func (s *SearchService) SearchKeyWordInGoogle(name string, i int, key string) (string, error) {
-	if s.Search == nil || s.Search.SearchClient == nil {
-		return "", fmt.Errorf("search client not initialized")
+	if len(companyName) > 30 {
+		return "", fmt.Errorf("company name too long")
 	}
 
-	if key == "" {
-		return "", fmt.Errorf("search engine key is empty")
-	}
+	resp, err := s.Client.Search.Messages.New(context.TODO(), anthropic.MessageNewParams{
+		Model:     anthropic.ModelClaudeSonnet4_5_20250929,
+		MaxTokens: 512,
+		Tools: []anthropic.ToolUnionParam{
+			{
+				OfTool: &anthropic.ToolParam{
+					Type: "web_search_20250305",
+					Name: "web_search",
+				},
+			},
+		},
+		Messages: []anthropic.MessageParam{
+			{
+				Role: anthropic.MessageParamRoleUser,
+				Content: []anthropic.ContentBlockParamUnion{
+					{
+						OfText: &anthropic.TextBlockParam{
+							Type: "text",
+							Text: fmt.Sprintf(`Find the official website URL for the company "%s". 
+Return ONLY the main domain URL (e.g., https://example.com).
+If not found, return "NOT_FOUND".`, companyName),
+						},
+					},
+				},
+			},
+		},
+	})
 
-	v, err := s.Search.SearchClient.Cse.List().Q(name + "company official website").Cx(key).Do()
 	if err != nil {
-		logger.Error().Err(err).Str("name", name).Msg("search API error")
 		return "", err
 	}
 
-	if v == nil || len(v.Items) == 0 {
-		logger.Warn().Str("name", name).Msg("no search results found")
-		return "", fmt.Errorf("no results found for %s", name)
+	for _, block := range resp.Content {
+		if block.Type == "text" {
+			url := extractURLFromText(block.Text)
+			if url != "" && url != "NOT_FOUND" {
+				return url, nil
+			}
+		}
 	}
 
-	url := v.Items[0].DisplayLink
-	logger.Info().Str("url", url).Int("workerId", i).Msg("search results")
+	return "", fmt.Errorf("no website found for %s", companyName)
+}
 
-	return url, nil
+func extractURLFromText(text string) string {
+	text = strings.TrimSpace(text)
+
+	words := strings.Fields(text)
+	for _, word := range words {
+		word = strings.TrimRight(word, ".,;:!?")
+		if strings.HasPrefix(word, "http://") || strings.HasPrefix(word, "https://") {
+			return word
+		}
+	}
+
+	for _, word := range words {
+		word = strings.TrimRight(word, ".,;:!?")
+		if strings.Contains(word, ".com") || strings.Contains(word, ".io") ||
+			strings.Contains(word, ".org") || strings.Contains(word, ".net") {
+			if !strings.HasPrefix(word, "http") {
+				return "https://" + word
+			}
+			return word
+		}
+	}
+
+	return text
 }

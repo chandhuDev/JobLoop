@@ -2,11 +2,11 @@ package service
 
 import (
 	"context"
-	"os"
 	"regexp"
 	"strings"
 	"sync"
-	"sync/atomic"
+
+	// "sync/atomic"
 	"time"
 
 	"github.com/chandhuDev/JobLoop/internal/interfaces"
@@ -18,6 +18,11 @@ import (
 
 type SeedCompanyService struct {
 	SeedCompany *models.SeedCompanyArray
+}
+
+type CompanyData struct {
+	Name string
+	URL  string
 }
 
 func NewSeedCompanyScraper(companyConfig models.SeedCompany) *models.SeedCompany {
@@ -120,9 +125,6 @@ func (s *SeedCompanyService) GetSeedCompaniesFromPeerList(scraper *interfaces.Sc
 func (s *SeedCompanyService) GetSeedCompaniesFromYCombinator(ctx context.Context, scraper *interfaces.ScraperClient, yc *models.SeedCompany) {
 	logger.Info().Msg("worker started for ycombinator")
 
-	 const maxCompanies = 10
-	var processedCount atomic.Int32
-
 	logger.Info().Msg("START processing for ycombinator")
 	page, err := scraper.Browser.RunInNewTab()
 	if err != nil {
@@ -143,48 +145,25 @@ func (s *SeedCompanyService) GetSeedCompaniesFromYCombinator(ctx context.Context
 		State: playwright.LoadStateNetworkidle,
 	})
 
-	locator := page.Locator(yc.Selector)
-	count, _ := locator.Count()
-	logger.Info().Int("count", count).Msg("Found companies")
+	// STRATEGY 1: Scroll to load ALL companies first before processing
+	logger.Info().Msg("Loading all companies by scrolling...")
+	totalCompanies := loadAllCompaniesByScrolling(page, yc.Selector)
+	logger.Info().Int("total_companies", totalCompanies).Msg("All companies loaded")
 
-	for i := 0; i < count; i++ {
-		// Check if we've reached the limit
-		if processedCount.Load() >= maxCompanies {
-			logger.Info().Int("processed", int(processedCount.Load())).Msg("Reached maximum company limit, stopping YCombinator scraping")
-			break
-		}
-		// if i >= count {
-		// 	slog.Warn("Not enough nodes in Ycombinator", slog.Int("have", count), slog.Int("need", i))
-		// 	break
-		// }
+	// STRATEGY 2: Extract all company data upfront (name + URL)
+	companyData := extractAllCompanyData(page, yc.Selector)
+	logger.Info().Int("extracted_count", len(companyData)).Msg("Extracted all company data")
 
-		item := locator.Nth(i)
+	// STRATEGY 3: Process each company using the extracted data
+	for i, company := range companyData {
+		logger.Info().
+			Int("index", i).
+			Int("total", len(companyData)).
+			Str("name", company.Name).
+			Str("url", company.URL).
+			Msg("Processing company")
 
-		nameLocator := item.Locator("span").First()
-		name, err := nameLocator.TextContent()
-		if err != nil {
-			logger.Error().Err(err).Msg("error getting name at YC")
-			continue
-		}
-		name = strings.TrimSpace(name)
-		if err := item.Click(); err != nil {
-			logger.Error().Err(err).Msg("error clicking item at YC")
-			continue
-		}
-
-		urlLocator := page.Locator("div.group a").First()
-		url, err := urlLocator.GetAttribute("href")
-		if err != nil {
-			logger.Error().Err(err).Msg("error getting url at YC")
-			url = ""
-		}
-
-		logger.Info().Str("CompanyName", name).Str("CompanyURL", url).Msg("seed company Ycombinator")
-
-		// Increment counter
-		processedCount.Add(1)
-
-		scrId := CreateSeedCompanyRepo(name, url, -1, *scraper)
+		scrId := CreateSeedCompanyRepo(company.Name, company.URL, -1, *scraper)
 
 		done := make(chan struct{})
 		go func(companyUrl string, seedId uint, companyName string) {
@@ -199,48 +178,132 @@ func (s *SeedCompanyService) GetSeedCompaniesFromYCombinator(ctx context.Context
 
 			logger.Info().Str("company", companyName).Int("job_count", len(scrapedJobResults)).Msg("SUCCESS: Upserted jobs")
 
-		}(url, scrId, name)
+		}(company.URL, scrId, company.Name)
 
 		s.SeedCompany.ResultChan <- models.SeedCompanyResult{
-			CompanyName:   name,
-			CompanyURL:    url,
+			CompanyName:   company.Name,
+			CompanyURL:    company.URL,
 			SeedCompanyId: scrId,
 		}
-		time.Sleep(5 * time.Second)
 
 		done <- struct{}{}
 
-		//naviagte back to main page
-		if _, err := page.Goto(yc.URL, playwright.PageGotoOptions{
-			WaitUntil: playwright.WaitUntilStateDomcontentloaded,
-		}); err != nil {
-			logger.Error().Err(err).Msg("error navigating back")
-			break
+		time.Sleep(3 * time.Second)
+	}
+}
+
+// loadAllCompaniesByScrolling scrolls to the bottom to trigger infinite scroll and load all companie
+func loadAllCompaniesByScrolling(page playwright.Page, selector string) int {
+	previousCount := 0
+	stableCount := 0
+	maxStableAttempts := 3 // If count doesn't change 3 times, assume we've loaded everything
+
+	for {
+		// Get current count
+		locator := page.Locator(selector)
+		currentCount, _ := locator.Count()
+
+		logger.Info().Int("current", currentCount).Int("previous", previousCount).Msg("Company count during scroll")
+
+		// Check if count has stabilized
+		if currentCount == previousCount {
+			stableCount++
+			if stableCount >= maxStableAttempts {
+				logger.Info().Int("final_count", currentCount).Msg("Scroll complete - count stabilized")
+				break
+			}
+		} else {
+			stableCount = 0 // Reset if count changed
 		}
 
-		page.WaitForLoadState(playwright.PageWaitForLoadStateOptions{
-			State: playwright.LoadStateNetworkidle,
-		})
+		previousCount = currentCount
 
-		count, _ = locator.Count()
-		if count == 0 {
-			logger.Warn().Msg("No nodes after re-navigation")
+		// Scroll to bottom
+		page.Evaluate(`
+			() => {
+				window.scrollTo(0, document.body.scrollHeight);
+			}
+		`)
+
+		// Wait for new content to load
+		time.Sleep(10 * time.Second)
+
+		// Alternative: Scroll to last visible element
+		if currentCount > 0 {
+			lastItem := locator.Nth(currentCount - 1)
+			lastItem.ScrollIntoViewIfNeeded()
+			time.Sleep(3 * time.Second)
+		}
+
+		// Safety: Stop after scrolling too many times
+		if currentCount > 200 {
+			logger.Warn().Msg("Reached safety limit of 200 companies")
 			break
 		}
 	}
+
+	return previousCount
+}
+
+// extractAllCompanyData extracts name and URL for all companies at once
+func extractAllCompanyData(page playwright.Page, selector string) []CompanyData {
+	locator := page.Locator(selector)
+	count, _ := locator.Count()
+
+	companies := make([]CompanyData, 0, count)
+
+	for i := 0; i < count; i++ {
+		item := locator.Nth(i)
+
+		// Extract name
+		nameLocator := item.Locator("span").First()
+		name, err := nameLocator.TextContent()
+		if err != nil {
+			logger.Error().Err(err).Int("index", i).Msg("error getting name at YC")
+			continue
+		}
+		name = strings.TrimSpace(name)
+
+		// Click to reveal URL
+		if err := item.Click(); err != nil {
+			logger.Error().Err(err).Int("index", i).Msg("error clicking item at YC")
+			continue
+		}
+
+		// Small wait for panel to open
+		time.Sleep(500 * time.Millisecond)
+
+		// Extract URL
+		urlLocator := page.Locator("div.group a").First()
+		url, err := urlLocator.GetAttribute("href")
+		if err != nil {
+			logger.Error().Err(err).Int("index", i).Msg("error getting url at YC")
+			url = ""
+		}
+
+		companies = append(companies, CompanyData{
+			Name: name,
+			URL:  url,
+		})
+
+		// Close panel (click elsewhere or ESC key)
+		page.Keyboard().Press("Escape")
+		time.Sleep(300 * time.Millisecond)
+
+		// Periodic logging
+		if (i+1)%10 == 0 {
+			logger.Info().Int("extracted", i+1).Int("total", count).Msg("Extraction progress")
+		}
+	}
+
+	return companies
 }
 
 func (s *SeedCompanyService) UploadSeedCompanyToChannel(scraper *interfaces.ScraperClient) {
 	var searchWg sync.WaitGroup
-	var searchEngineKey = os.Getenv("GOOGLE_SEARCH_ENGINE")
 
-	const maxCompanies = 15
-	 var processedCount atomic.Int32
-
-	if searchEngineKey == "" {
-		logger.Error().Msg("searchEngineKey is empty, skipping search")
-		return
-	}
+	// const maxCompanies = 15
+	// var processedCount atomic.Int32
 
 	workerCount := 2
 	for i := 0; i < workerCount; i++ {
@@ -250,17 +313,17 @@ func (s *SeedCompanyService) UploadSeedCompanyToChannel(scraper *interfaces.Scra
 			logger.Info().Int("id", workerID).Msg("starting goroutine for search scraper in uploadSeedCompanyToChannel func by")
 			for name := range scraper.NamesChanClient.NamesChan {
 				// Check if we've reached the limit
-				if processedCount.Load() >= maxCompanies {
-					logger.Info().Int("worker", workerID).Int("processed", int(processedCount.Load())).Msg("Reached maximum company limit, stopping PeerList processing")
-					return
-				}
+				// if processedCount.Load() >= maxCompanies {
+				// 	logger.Info().Int("worker", workerID).Int("processed", int(processedCount.Load())).Msg("Reached maximum company limit, stopping PeerList processing")
+				// 	return
+				// }
 				if scraper.Search == nil {
 					logger.Error().Msg("Search client is nil")
 					continue
 				}
 
-				result, err := scraper.Search.SearchKeyWordInGoogle(
-					name, workerID, searchEngineKey,
+				result, err := scraper.Search.SearchKeyword(
+					name, workerID,
 				)
 
 				if err != nil {
@@ -273,10 +336,10 @@ func (s *SeedCompanyService) UploadSeedCompanyToChannel(scraper *interfaces.Scra
 					continue
 				}
 
-				logger.Info().Str("url", result).Msg("company url in peerlist")
+				logger.Info().Str("url", result).Msg("company url result")
 
 				// Increment counter
-				 processedCount.Add(1)
+				// processedCount.Add(1)
 
 				scrId := CreateSeedCompanyRepo(name, result, workerID, *scraper)
 
