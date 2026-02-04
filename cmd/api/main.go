@@ -12,7 +12,7 @@ import (
 	"github.com/chandhuDev/JobLoop/internal/logger"
 	models "github.com/chandhuDev/JobLoop/internal/models"
 	service "github.com/chandhuDev/JobLoop/internal/service"
-	// "github.com/joho/godotenv"
+	"github.com/joho/godotenv"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -20,10 +20,7 @@ func main() {
 	// Initialize logger
 	logger.Init(logger.DefaultConfig())
 
-	// if err := godotenv.Load(); err != nil {
-	// 	logger.Error().Err(err).Msg("error loading env file")
-	// 	os.Exit(1)
-	// }
+	_ = godotenv.Load()
 
 	requiredEnvs := []string{"MAX_LEN", "ANTHROPIC_API_KEY"}
 	for _, env := range requiredEnvs {
@@ -143,7 +140,6 @@ func run(ctx context.Context) int {
 
 	g, gCtx := errgroup.WithContext(ctx)
 
-	// HTTP server - runs until shutdown signal
 	g.Go(func() error {
 		logger.Info().Str("addr", server.Addr).Msg("Starting HTTP server")
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
@@ -152,7 +148,6 @@ func run(ctx context.Context) int {
 		return nil
 	})
 
-	// Graceful shutdown handler - only triggered by signal
 	g.Go(func() error {
 		<-gCtx.Done()
 		logger.Info().Msg("Shutting down HTTP server...")
@@ -161,8 +156,6 @@ func run(ctx context.Context) int {
 		return server.Shutdown(shutdownCtx)
 	})
 
-	// Run scrapers in BACKGROUND (not blocking main execution)
-	// These complete independently without shutting down the server
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {

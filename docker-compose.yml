@@ -2,25 +2,21 @@ version: '3.8'
 
 services:
   app:
-    build: .
-    container_name: jobloop-app
+    image: chandhudev0/jobloop:1.0
+    container_name: jobloop
     shm_size: '2gb'
+    ports:
+      - "5100:5001"
     depends_on:
       postgres:
         condition: service_healthy
-    environment:
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
-      - DB_HOST=${DB_HOST}
-      - DB_PORT=5432
-      - DB_USER=${POSTGRES_USER}
-      - DB_PASSWORD=${POSTGRES_PASSWORD}
-      - DB_NAME=jobloop
-      - MAX_LEN=${MAX_LEN}
-    volumes:
-      - app_logs:/app/logs
+    env_file:
+      - .env.docker
     restart: unless-stopped
     networks:
       - jobloop-network
+    volumes:
+      - app_logs:/app/logs
     logging:
       driver: "json-file"
       options:
@@ -68,7 +64,7 @@ services:
 
 
   loki:
-    image: grafana/loki:2.9.0
+    image: grafana/loki:latest
     container_name: jobloop-loki
     ports:
       - "3100:3100"
@@ -82,7 +78,7 @@ services:
 
 
   promtail:
-    image: grafana/promtail:2.9.0
+    image: grafana/promtail:latest
     container_name: jobloop-promtail
     volumes:
       - ./configs/promtail-config.yml:/etc/promtail/config.yml:ro
@@ -97,7 +93,7 @@ services:
 
 
   grafana:
-    image: grafana/grafana:10.0.0
+    image: grafana/grafana:latest
     container_name: jobloop-grafana
     ports:
       - "3000:3000"
