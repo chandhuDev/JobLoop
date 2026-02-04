@@ -16,11 +16,11 @@ var Log zerolog.Logger
 type Config struct {
 	Level      string
 	LogDir     string
-	MaxSize    int  // Max size in MB before rotation
-	MaxBackups int  // Max number of old log files to retain
-	MaxAge     int  // Max number of days to retain old log files
-	Compress   bool // Compress rotated files
-	Console    bool // Also output to console
+	MaxSize    int 
+	MaxBackups int 
+	MaxAge     int 
+	Compress   bool 
+	Console    bool 
 }
 
 // DefaultConfig returns sensible defaults
@@ -28,9 +28,9 @@ func DefaultConfig() Config {
 	return Config{
 		Level:      getEnv("LOG_LEVEL", "info"),
 		LogDir:     getEnv("LOG_DIR", "./logs"),
-		MaxSize:    100, // 100 MB
+		MaxSize:    100,
 		MaxBackups: 3,
-		MaxAge:     28, // 28 days
+		MaxAge:     28,
 		Compress:   true,
 		Console:    getEnv("ENV", "development") == "development",
 	}

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	models "github.com/chandhuDev/JobLoop/internal/models"
+	"github.com/chandhuDev/JobLoop/internal/schema"
 )
 
 type HTTPHandlerService struct {
@@ -65,15 +66,14 @@ func (h *HTTPHandlerService) getCompanies(w http.ResponseWriter, r *http.Request
 		}
 	}
 
-	// Query database
-	var companies []models.SeedCompany
-	result := h.HttpHandler.Db.DB.Limit(limit).Offset(offset).Find(&companies)
+	var companies []schema.SeedCompany
+	result := h.HttpHandler.Db.DB.Order("id ASC").Limit(limit).Offset(offset).Find(&companies)
 	if result.Error != nil {
 		h.errorResponse(w, http.StatusInternalServerError, "Failed to fetch companies")
 		return
 	}
 	var total int64
-	h.HttpHandler.Db.DB.Model(&models.SeedCompany{}).Count(&total)
+	h.HttpHandler.Db.DB.Model(&schema.SeedCompany{}).Count(&total)
 
 	h.jsonResponse(w, http.StatusOK, map[string]interface{}{
 		"data":   companies,

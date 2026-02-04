@@ -1,7 +1,6 @@
 package service
 
 import (
-	// vision "cloud.google.com/go/vision/apiv1"
 	"github.com/anthropics/anthropic-sdk-go"
 	interfaces "github.com/chandhuDev/JobLoop/internal/interfaces"
 	"github.com/chandhuDev/JobLoop/internal/models"

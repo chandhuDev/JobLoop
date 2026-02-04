@@ -2,12 +2,15 @@ package service
 
 import (
 	"context"
+	"fmt"
+	"net/url"
+	"os"
 	"regexp"
 	"strings"
 	"sync"
 
-	// "sync/atomic"
 	"time"
+	"strconv"
 
 	"github.com/chandhuDev/JobLoop/internal/interfaces"
 	"github.com/chandhuDev/JobLoop/internal/logger"
@@ -21,8 +24,9 @@ type SeedCompanyService struct {
 }
 
 type CompanyData struct {
-	Name string
-	URL  string
+	Name      string // Company name from YC listing
+	YCUrl     string // YCombinator profile URL (/companies/doordash)
+	ActualURL string // Actual company website URL (scraped from YC profile)
 }
 
 func NewSeedCompanyScraper(companyConfig models.SeedCompany) *models.SeedCompany {
@@ -145,25 +149,28 @@ func (s *SeedCompanyService) GetSeedCompaniesFromYCombinator(ctx context.Context
 		State: playwright.LoadStateNetworkidle,
 	})
 
-	// STRATEGY 1: Scroll to load ALL companies first before processing
-	logger.Info().Msg("Loading all companies by scrolling...")
-	totalCompanies := loadAllCompaniesByScrolling(page, yc.Selector)
-	logger.Info().Int("total_companies", totalCompanies).Msg("All companies loaded")
+	// Step 1: Scrape all company names and YC URLs
+	companyData := scrapeCompaniesWithScroll(page, yc.Selector)
+	logger.Info().Int("total_companies", len(companyData)).Msg("Finished scraping all companies")
 
-	// STRATEGY 2: Extract all company data upfront (name + URL)
-	companyData := extractAllCompanyData(page, yc.Selector)
-	logger.Info().Int("extracted_count", len(companyData)).Msg("Extracted all company data")
+	// Step 2: Visit each YC profile to get actual company URLs
+	companyData, err = getCompanyUrls(page, companyData)
+	if err != nil {
+		logger.Error().Err(err).Msg("error at getCompanyUrls")
+		return
+	}
 
-	// STRATEGY 3: Process each company using the extracted data
+	// Step 3: Process each company
 	for i, company := range companyData {
-		logger.Info().
-			Int("index", i).
-			Int("total", len(companyData)).
-			Str("name", company.Name).
-			Str("url", company.URL).
-			Msg("Processing company")
+		logger.Info().Int("index", i+1).Int("total", len(companyData)).Str("company", company.Name).Str("url", company.ActualURL).Msg("Processing company")
 
-		scrId := CreateSeedCompanyRepo(company.Name, company.URL, -1, *scraper)
+		// Skip if no actual URL found
+		if company.ActualURL == "" {
+			logger.Warn().Str("company", company.Name).Msg("Skipping company - no actual URL found")
+			continue
+		}
+
+		scrId := CreateSeedCompanyRepo(company.Name, company.ActualURL, -1, *scraper)
 
 		done := make(chan struct{})
 		go func(companyUrl string, seedId uint, companyName string) {
@@ -178,11 +185,11 @@ func (s *SeedCompanyService) GetSeedCompaniesFromYCombinator(ctx context.Context
 
 			logger.Info().Str("company", companyName).Int("job_count", len(scrapedJobResults)).Msg("SUCCESS: Upserted jobs")
 
-		}(company.URL, scrId, company.Name)
+		}(company.ActualURL, scrId, company.Name)
 
 		s.SeedCompany.ResultChan <- models.SeedCompanyResult{
 			CompanyName:   company.Name,
-			CompanyURL:    company.URL,
+			CompanyURL:    company.ActualURL,
 			SeedCompanyId: scrId,
 		}
 
@@ -192,111 +199,182 @@ func (s *SeedCompanyService) GetSeedCompaniesFromYCombinator(ctx context.Context
 	}
 }
 
-// loadAllCompaniesByScrolling scrolls to the bottom to trigger infinite scroll and load all companie
-func loadAllCompaniesByScrolling(page playwright.Page, selector string) int {
-	previousCount := 0
-	stableCount := 0
-	maxStableAttempts := 3 // If count doesn't change 3 times, assume we've loaded everything
+func scrapeCompaniesWithScroll(page playwright.Page, selector string) []CompanyData {
+	var allCompanies []CompanyData
+	seenNames := make(map[string]bool)
+	noNewCompaniesSince := 0
+	maxNoNewAttempts := 3
+	previousVisibleCount := 0
+	maxlengthEnv := os.Getenv("MAX_LEN")
+
+	maxlength, _ := strconv.Atoi(maxlengthEnv)
+    logger.Info().Msg("Starting company scraping with scroll")
 
 	for {
-		// Get current count
-		locator := page.Locator(selector)
-		currentCount, _ := locator.Count()
+		// Use JavaScript to extract all visible companies at once
+		result, err := page.Evaluate(fmt.Sprintf(`
+			() => {
+				const items = document.querySelectorAll('%s');
+				const companies = [];
+				
+				items.forEach((item, index) => {
+					const span = item.querySelector('span');
+					const name = span ? span.textContent.trim() : '';
+					const href = item.getAttribute('href') || '';
+					
+					if (name) {
+						companies.push({ name, href, index });
+					}
+				});
+				
+				return companies;
+			}
+		`, selector))
 
-		logger.Info().Int("current", currentCount).Int("previous", previousCount).Msg("Company count during scroll")
+		if err != nil {
+			logger.Error().Err(err).Msg("Failed to extract companies with JS")
+			break
+		}
 
-		// Check if count has stabilized
-		if currentCount == previousCount {
-			stableCount++
-			if stableCount >= maxStableAttempts {
-				logger.Info().Int("final_count", currentCount).Msg("Scroll complete - count stabilized")
+		// Parse the result
+		companiesArray, ok := result.([]interface{})
+		if !ok {
+			logger.Warn().Msg("Unexpected result format from JS")
+			break
+		}
+
+		currentVisibleCount := len(companiesArray)
+		logger.Info().Int("visible_count", currentVisibleCount).Int("previous_count", previousVisibleCount).Msg("Found visible company anchors")
+
+		newCompaniesFound := 0
+		for _, item := range companiesArray {
+			companyMap, ok := item.(map[string]interface{})
+			if !ok {
+				continue
+			}
+
+			name, _ := companyMap["name"].(string)
+			href, _ := companyMap["href"].(string)
+			index, _ := companyMap["index"].(float64)
+
+			name = strings.TrimSpace(name)
+
+			// Skip if empty or already seen
+			if name == "" || seenNames[name] {
+				continue
+			}
+
+			fullURL := href
+			if strings.HasPrefix(href, "/") {
+				pageURL := page.URL()
+				baseURL, _ := url.Parse(pageURL)
+				if baseURL != nil {
+					relURL, _ := url.Parse(href)
+					fullURL = baseURL.ResolveReference(relURL).String()
+				}
+			}
+
+			// Add to results with YCUrl populated
+			allCompanies = append(allCompanies, CompanyData{
+				Name:      name,
+				YCUrl:     fullURL,
+				ActualURL: "",
+			})
+			seenNames[name] = true
+			newCompaniesFound++
+
+			logger.Info().Int("scraped_count", len(allCompanies)).Int("index", int(index)).Str("name", name).Str("yc_url", fullURL).Msg("SCRAPED company")
+		}
+
+		logger.Info().Int("new_found", newCompaniesFound).Int("total_scraped", len(allCompanies)).Msg("Scraping batch complete")
+
+		if currentVisibleCount == previousVisibleCount {
+			noNewCompaniesSince++
+			logger.Warn().Int("attempts", noNewCompaniesSince).Int("stuck_at_count", currentVisibleCount).Msg("Visible count did not increase after scroll")
+
+			if noNewCompaniesSince >= maxNoNewAttempts {
+				logger.Info().Msg("No new companies loading after multiple scroll attempts, stopping")
 				break
 			}
 		} else {
-			stableCount = 0 // Reset if count changed
+			noNewCompaniesSince = 0
+			logger.Info().Int("old_count", previousVisibleCount).Int("new_count", currentVisibleCount).Int("loaded", currentVisibleCount-previousVisibleCount).Msg("New companies loaded after scroll")
 		}
 
-		previousCount = currentCount
+		previousVisibleCount = currentVisibleCount
 
-		// Scroll to bottom
-		page.Evaluate(`
+		logger.Info().Msg("Scrolling to load more companies...")
+
+		lastElementScrolled, _ := page.Evaluate(fmt.Sprintf(`
 			() => {
-				window.scrollTo(0, document.body.scrollHeight);
+				const items = document.querySelectorAll('%s');
+				if (items.length > 0) {
+					const lastItem = items[items.length - 1];
+					lastItem.scrollIntoView({ behavior: 'smooth', block: 'end' });
+					return true;
+				}
+				return false;
 			}
-		`)
+		`, selector))
 
-		// Wait for new content to load
-		time.Sleep(10 * time.Second)
+		logger.Info().Bool("scrolled_to_last", lastElementScrolled == true).Msg("Scrolled to last element")
+		time.Sleep(1500 * time.Millisecond)
 
-		// Alternative: Scroll to last visible element
-		if currentCount > 0 {
-			lastItem := locator.Nth(currentCount - 1)
-			lastItem.ScrollIntoViewIfNeeded()
-			time.Sleep(3 * time.Second)
-		}
+		page.Evaluate(`() => window.scrollTo(0, document.body.scrollHeight)`)
+		time.Sleep(1500 * time.Millisecond)
 
-		// Safety: Stop after scrolling too many times
-		if currentCount > 200 {
-			logger.Warn().Msg("Reached safety limit of 200 companies")
+		page.Evaluate(`() => window.scrollBy(0, 1000)`)
+		time.Sleep(1500 * time.Millisecond)
+
+		if len(allCompanies) > maxlength {
+			logger.Warn().Msg("Reached safety limit of 5000 companies")
 			break
 		}
 	}
 
-	return previousCount
+	logger.Info().Int("total_scraped", len(allCompanies)).Msg("Scraping complete")
+	return allCompanies
 }
 
-// extractAllCompanyData extracts name and URL for all companies at once
-func extractAllCompanyData(page playwright.Page, selector string) []CompanyData {
-	locator := page.Locator(selector)
-	count, _ := locator.Count()
+func getCompanyUrls(page playwright.Page, data []CompanyData) ([]CompanyData, error) {
+	logger.Info().Int("total", len(data)).Msg("Starting to fetch actual company URLs")
 
-	companies := make([]CompanyData, 0, count)
+	for i := range data {
+		logger.Info().Int("index", i+1).Int("total", len(data)).Str("company", data[i].Name).Str("yc_url", data[i].YCUrl).Msg("Fetching actual URL")
 
-	for i := 0; i < count; i++ {
-		item := locator.Nth(i)
-
-		// Extract name
-		nameLocator := item.Locator("span").First()
-		name, err := nameLocator.TextContent()
+		_, err := page.Goto(data[i].YCUrl, playwright.PageGotoOptions{
+			WaitUntil: playwright.WaitUntilStateDomcontentloaded,
+			Timeout:   playwright.Float(30000),
+		})
 		if err != nil {
-			logger.Error().Err(err).Int("index", i).Msg("error getting name at YC")
-			continue
-		}
-		name = strings.TrimSpace(name)
-
-		// Click to reveal URL
-		if err := item.Click(); err != nil {
-			logger.Error().Err(err).Int("index", i).Msg("error clicking item at YC")
+			logger.Error().Err(err).Str("company", data[i].Name).Str("yc_url", data[i].YCUrl).Msg("Failed to navigate to YC profile")
 			continue
 		}
 
-		// Small wait for panel to open
-		time.Sleep(500 * time.Millisecond)
-
-		// Extract URL
-		urlLocator := page.Locator("div.group a").First()
-		url, err := urlLocator.GetAttribute("href")
-		if err != nil {
-			logger.Error().Err(err).Int("index", i).Msg("error getting url at YC")
-			url = ""
-		}
-
-		companies = append(companies, CompanyData{
-			Name: name,
-			URL:  url,
+		page.WaitForLoadState(playwright.PageWaitForLoadStateOptions{
+			State: playwright.LoadStateNetworkidle,
 		})
 
-		// Close panel (click elsewhere or ESC key)
-		page.Keyboard().Press("Escape")
-		time.Sleep(300 * time.Millisecond)
-
-		// Periodic logging
-		if (i+1)%10 == 0 {
-			logger.Info().Int("extracted", i+1).Int("total", count).Msg("Extraction progress")
+		urlLocator := page.Locator("div.group a").First()
+		actualURL, err := urlLocator.GetAttribute("href", playwright.LocatorGetAttributeOptions{
+			Timeout: playwright.Float(5000),
+		})
+		if err != nil {
+			logger.Warn().Err(err).Str("company", data[i].Name).Msg("Failed to get actual company URL")
+			actualURL = ""
 		}
+
+		// Update the ActualURL in the same struct
+		data[i].ActualURL = actualURL
+
+		logger.Info().Str("company", data[i].Name).Str("actual_url", actualURL).Msg("SCRAPED actual company URL")
+
+		// Small delay to avoid overwhelming the server
+		time.Sleep(500 * time.Millisecond)
 	}
 
-	return companies
+	logger.Info().Int("total_with_urls", len(data)).Msg("Finished fetching actual URLs")
+	return data, nil
 }
 
 func (s *SeedCompanyService) UploadSeedCompanyToChannel(scraper *interfaces.ScraperClient) {

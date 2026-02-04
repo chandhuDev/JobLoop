@@ -12,7 +12,7 @@ import (
 	"github.com/chandhuDev/JobLoop/internal/logger"
 	models "github.com/chandhuDev/JobLoop/internal/models"
 	service "github.com/chandhuDev/JobLoop/internal/service"
-	"github.com/joho/godotenv"
+	// "github.com/joho/godotenv"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -20,12 +20,12 @@ func main() {
 	// Initialize logger
 	logger.Init(logger.DefaultConfig())
 
-	if err := godotenv.Load(); err != nil {
-		logger.Error().Err(err).Msg("error loading env file")
-		os.Exit(1)
-	}
+	// if err := godotenv.Load(); err != nil {
+	// 	logger.Error().Err(err).Msg("error loading env file")
+	// 	os.Exit(1)
+	// }
 
-	requiredEnvs := []string{"GOOGLE_API_KEY", "GOOGLE_SEARCH_ENGINE"}
+	requiredEnvs := []string{"MAX_LEN", "ANTHROPIC_API_KEY"}
 	for _, env := range requiredEnvs {
 		if os.Getenv(env) == "" {
 			logger.Error().Str("var", env).Msg("required env variable not set")
@@ -143,6 +143,7 @@ func run(ctx context.Context) int {
 
 	g, gCtx := errgroup.WithContext(ctx)
 
+	// HTTP server - runs until shutdown signal
 	g.Go(func() error {
 		logger.Info().Str("addr", server.Addr).Msg("Starting HTTP server")
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
@@ -151,6 +152,7 @@ func run(ctx context.Context) int {
 		return nil
 	})
 
+	// Graceful shutdown handler - only triggered by signal
 	g.Go(func() error {
 		<-gCtx.Done()
 		logger.Info().Msg("Shutting down HTTP server...")
@@ -159,36 +161,36 @@ func run(ctx context.Context) int {
 		return server.Shutdown(shutdownCtx)
 	})
 
-	g.Go(func() error {
+	// Run scrapers in BACKGROUND (not blocking main execution)
+	// These complete independently without shutting down the server
+	go func() {
 		defer func() {
 			if r := recover(); r != nil {
 				logger.Error().Interface("error", r).Msg("Panic in SeedCompany")
 			}
 		}()
 		seedCompany.SeedCompanyConfigs(gCtx, scraperClient)
-		logger.Info().Msg("SeedCompany finished")
-		return nil
-	})
+		logger.Info().Msg("SeedCompany scraping completed")
+	}()
 
-	g.Go(func() error {
+	go func() {
 		defer func() {
 			if r := recover(); r != nil {
 				logger.Error().Interface("error", r).Msg("Panic in Testimonial")
-				// close(abcdChan)
 			}
 		}()
 		testimonial.ScrapeTestimonial(gCtx, scraperClient,
 			seedCompany.SeedCompany.ResultChan,
 			*visionWrapper)
-		logger.Info().Msg("Testimonial finished")
-		return nil
-	})
+		logger.Info().Msg("Testimonial scraping completed")
+	}()
 
+	// Wait only for HTTP server (blocks until signal received)
 	if err := g.Wait(); err != nil {
 		logger.Error().Err(err).Msg("Error in errgroup")
 		return 1
 	}
 
-	logger.Info().Msg("All work completed successfully")
+	logger.Info().Msg("Graceful shutdown completed")
 	return 0
 }

@@ -32,8 +32,8 @@ func (t *TestimonialService) ScrapeTestimonial(
 	scChan <-chan models.SeedCompanyResult,
 	vision VisionWrapper,
 ) {
-	numTestimonialWorkers := 2
-	numImageWorkers := 2
+	numTestimonialWorkers := 4
+	numImageWorkers := 4
 
 	// Testimonial scraper workers
 	for i := 0; i < numTestimonialWorkers; i++ {

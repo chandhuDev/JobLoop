@@ -1,10 +1,8 @@
 bin/
 tests/
-.env
-.env.*
-
-docker-compose.yaml
-dockerfile
+.env.docker
+.env.local
 credentials/
 logs/
 build.log
+.env
