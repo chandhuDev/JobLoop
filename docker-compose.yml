@@ -1,28 +1,69 @@
 version: '3.8'
 
 services:
-  app:
-    image: chandhudev0/jobloop:1.0
-    container_name: jobloop
-    shm_size: '2gb'
+  server:
+    build:
+      context: .
+      dockerfile: Dockerfile.server
+    container_name: jobloop-server
     ports:
-      - "5100:5001"
+      - "5001:5001"
     depends_on:
       postgres:
         condition: service_healthy
-    env_file:
-      - .env.docker
+    environment:
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_USER=${POSTGRES_USER}
+      - DB_PASSWORD=${POSTGRES_PASSWORD}
     restart: unless-stopped
     networks:
       - jobloop-network
     volumes:
-      - app_logs:/app/logs
+      - server_logs:/app/logs
     logging:
       driver: "json-file"
       options:
         max-size: "10m"
         max-file: "3"
         tag: "{{.Name}}"
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:5001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  scraper:
+    build:
+      context: .
+      dockerfile: Dockerfile.scraper
+    container_name: jobloop-scraper
+    shm_size: '2gb'
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+      - MAX_LEN=${MAX_LEN}
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_USER=${POSTGRES_USER}
+      - DB_PASSWORD=${POSTGRES_PASSWORD}
+    restart: "no"
+    networks:
+      - jobloop-network
+    volumes:
+      - scraper_logs:/app/logs
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+        tag: "{{.Name}}"
+    profiles:
+      - scraper
 
 
   postgres:
@@ -83,7 +124,8 @@ services:
     volumes:
       - ./configs/promtail-config.yml:/etc/promtail/config.yml:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro
-      - app_logs:/app/logs:ro
+      - server_logs:/app/logs/server:ro
+      - scraper_logs:/app/logs/scraper:ro
     command: -config.file=/etc/promtail/config.yml
     depends_on:
       - loki
@@ -115,7 +157,8 @@ volumes:
   pgadmin_data:
   loki_data:
   grafana_data:
-  app_logs:
+  server_logs:
+  scraper_logs:
 
 networks:
   jobloop-network:

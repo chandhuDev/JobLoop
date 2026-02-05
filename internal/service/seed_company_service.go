@@ -200,15 +200,26 @@ func (s *SeedCompanyService) GetSeedCompaniesFromYCombinator(ctx context.Context
 }
 
 func scrapeCompaniesWithScroll(page playwright.Page, selector string) []CompanyData {
+	// Check MAX_LEN at the start before scraping
+	maxlengthEnv := os.Getenv("MAX_LEN")
+	if maxlengthEnv == "" {
+		logger.Error().Msg("MAX_LEN environment variable not set - cannot proceed with scraping")
+		return []CompanyData{}
+	}
+
+	maxlength, err := strconv.Atoi(maxlengthEnv)
+	if err != nil || maxlength <= 0 {
+		logger.Error().Str("MAX_LEN", maxlengthEnv).Msg("Invalid MAX_LEN value - must be a positive integer")
+		return []CompanyData{}
+	}
+
+	logger.Info().Int("max_length", maxlength).Msg("Starting company scraping with scroll - MAX_LEN validated")
+
 	var allCompanies []CompanyData
 	seenNames := make(map[string]bool)
 	noNewCompaniesSince := 0
 	maxNoNewAttempts := 3
 	previousVisibleCount := 0
-	maxlengthEnv := os.Getenv("MAX_LEN")
-
-	maxlength, _ := strconv.Atoi(maxlengthEnv)
-    logger.Info().Msg("Starting company scraping with scroll")
 
 	for {
 		// Use JavaScript to extract all visible companies at once
@@ -326,8 +337,8 @@ func scrapeCompaniesWithScroll(page playwright.Page, selector string) []CompanyD
 		page.Evaluate(`() => window.scrollBy(0, 1000)`)
 		time.Sleep(1500 * time.Millisecond)
 
-		if len(allCompanies) > maxlength {
-			logger.Warn().Msg("Reached safety limit of 5000 companies")
+		if len(allCompanies) >= maxlength {
+			logger.Info().Int("max_length", maxlength).Int("scraped", len(allCompanies)).Msg("Reached MAX_LEN limit, stopping scrape")
 			break
 		}
 	}

@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
@@ -13,7 +12,6 @@ import (
 	models "github.com/chandhuDev/JobLoop/internal/models"
 	service "github.com/chandhuDev/JobLoop/internal/service"
 	"github.com/joho/godotenv"
-	"golang.org/x/sync/errgroup"
 )
 
 func main() {
@@ -22,7 +20,7 @@ func main() {
 
 	_ = godotenv.Load()
 
-	requiredEnvs := []string{"MAX_LEN", "ANTHROPIC_API_KEY"}
+	requiredEnvs := []string{"MAX_LEN", "ANTHROPIC_API_KEY", "DB_USER", "DB_PASSWORD", "DB_HOST"}
 	for _, env := range requiredEnvs {
 		if os.Getenv(env) == "" {
 			logger.Error().Str("var", env).Msg("required env variable not set")
@@ -132,37 +130,17 @@ func run(ctx context.Context) int {
 	testimonialConfig := service.NewTestimonial()
 	testimonial := service.TestimonialService{Testimonial: testimonialConfig}
 
-	httpHandler := service.NewHTTPHandlerService(dbSvc.DB)
-	server := &http.Server{
-		Addr:    ":5001",
-		Handler: httpHandler,
-	}
+	// Channel to track scraper completion
+	done := make(chan struct{})
 
-	g, gCtx := errgroup.WithContext(ctx)
-
-	g.Go(func() error {
-		logger.Info().Str("addr", server.Addr).Msg("Starting HTTP server")
-		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			return err
-		}
-		return nil
-	})
-
-	g.Go(func() error {
-		<-gCtx.Done()
-		logger.Info().Msg("Shutting down HTTP server...")
-		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer shutdownCancel()
-		return server.Shutdown(shutdownCtx)
-	})
-
+	// Run scrapers
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
 				logger.Error().Interface("error", r).Msg("Panic in SeedCompany")
 			}
 		}()
-		seedCompany.SeedCompanyConfigs(gCtx, scraperClient)
+		seedCompany.SeedCompanyConfigs(ctx, scraperClient)
 		logger.Info().Msg("SeedCompany scraping completed")
 	}()
 
@@ -172,18 +150,21 @@ func run(ctx context.Context) int {
 				logger.Error().Interface("error", r).Msg("Panic in Testimonial")
 			}
 		}()
-		testimonial.ScrapeTestimonial(gCtx, scraperClient,
+		testimonial.ScrapeTestimonial(ctx, scraperClient,
 			seedCompany.SeedCompany.ResultChan,
 			*visionWrapper)
 		logger.Info().Msg("Testimonial scraping completed")
+		close(done)
 	}()
 
-	// Wait only for HTTP server (blocks until signal received)
-	if err := g.Wait(); err != nil {
-		logger.Error().Err(err).Msg("Error in errgroup")
-		return 1
+	// Wait for either completion or cancellation
+	select {
+	case <-done:
+		logger.Info().Msg("All scraping tasks completed successfully")
+	case <-ctx.Done():
+		logger.Info().Msg("Scraping interrupted by signal")
 	}
 
-	logger.Info().Msg("Graceful shutdown completed")
+	logger.Info().Msg("Shutdown complete")
 	return 0
 }
