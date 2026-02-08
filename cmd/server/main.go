@@ -11,6 +11,7 @@ import (
 	"github.com/chandhuDev/JobLoop/internal/logger"
 	"github.com/chandhuDev/JobLoop/server/database"
 	"github.com/chandhuDev/JobLoop/server/handlers"
+	"github.com/chandhuDev/JobLoop/server/middleware"
 )
 
 func main() {
@@ -37,9 +38,13 @@ func main() {
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
 
+	// Apply CORS middleware
+	corsConfig := middleware.DefaultCORSConfig()
+	handler := middleware.CORS(corsConfig)(mux)
+
 	server := &http.Server{
 		Addr:    ":5001",
-		Handler: mux,
+		Handler: handler,
 	}
 
 	sigChan := make(chan os.Signal, 1)

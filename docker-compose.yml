@@ -1,165 +1,275 @@
 version: '3.8'
 
 services:
+
   server:
-    build:
-      context: .
-      dockerfile: Dockerfile.server
+
+    image: chandhudev0/jobloop-server:1.0
+
     container_name: jobloop-server
+
     ports:
+
       - "5001:5001"
+
     depends_on:
+
       postgres:
+
         condition: service_healthy
-    environment:
-      - DB_HOST=postgres
-      - DB_PORT=5432
-      - DB_USER=${POSTGRES_USER}
-      - DB_PASSWORD=${POSTGRES_PASSWORD}
+
+    env_file:
+
+      - .env.docker
+
     restart: unless-stopped
+
     networks:
+
       - jobloop-network
+
     volumes:
+
       - server_logs:/app/logs
+
     logging:
+
       driver: "json-file"
+
       options:
+
         max-size: "10m"
+
         max-file: "3"
+
         tag: "{{.Name}}"
+
     healthcheck:
+
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:5001/health"]
+
       interval: 30s
+
       timeout: 10s
+
       retries: 3
+
       start_period: 10s
 
   scraper:
-    build:
-      context: .
-      dockerfile: Dockerfile.scraper
+
+    image: chandhudev0/jobloop:2.0
+
     container_name: jobloop-scraper
+
     shm_size: '2gb'
+
     depends_on:
+
       postgres:
+
         condition: service_healthy
-    environment:
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
-      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
-      - MAX_LEN=${MAX_LEN}
-      - DB_HOST=postgres
-      - DB_PORT=5432
-      - DB_USER=${POSTGRES_USER}
-      - DB_PASSWORD=${POSTGRES_PASSWORD}
+
+    env_file:
+
+      - .env.docker
+
     restart: "no"
+
     networks:
+
       - jobloop-network
+
     volumes:
+
       - scraper_logs:/app/logs
+
     logging:
+
       driver: "json-file"
+
       options:
+
         max-size: "10m"
+
         max-file: "3"
+
         tag: "{{.Name}}"
+
     profiles:
+
       - scraper
 
-
   postgres:
-    image: postgres:15-alpine
-    container_name: jobloop-postgres
-    environment:
-      - POSTGRES_USER=${POSTGRES_USER}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
-      - POSTGRES_DB=jobloop
-    ports:
-      - "5432:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d jobloop"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    restart: unless-stopped
-    networks:
-      - jobloop-network
 
+    image: postgres:15-alpine
+
+    container_name: jobloop-postgres
+
+    environment:
+
+      - POSTGRES_USER=${POSTGRES_USER}
+
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+
+      - POSTGRES_DB=jobloop
+
+    ports:
+
+      - "5432:5432"
+
+    volumes:
+
+      - postgres_data:/var/lib/postgresql/data
+
+    healthcheck:
+
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d jobloop"]
+
+      interval: 10s
+
+      timeout: 5s
+
+      retries: 5
+
+    restart: unless-stopped
+
+    networks:
+
+      - jobloop-network
 
   pgadmin:
-    image: dpage/pgadmin4:latest
-    container_name: jobloop-pgadmin
-    depends_on:
-      - postgres
-    environment:
-      - PGADMIN_DEFAULT_EMAIL=${PGADMIN_DEFAULT_EMAIL}
-      - PGADMIN_DEFAULT_PASSWORD=${PGADMIN_DEFAULT_PASSWORD}
-    ports:
-      - "8080:80"
-    volumes:
-      - pgadmin_data:/var/lib/pgadmin
-    restart: unless-stopped
-    networks:
-      - jobloop-network
 
+    image: dpage/pgadmin4:latest
+
+    container_name: jobloop-pgadmin
+
+    depends_on:
+
+      - postgres
+
+    environment:
+
+      - PGADMIN_DEFAULT_EMAIL=${PGADMIN_DEFAULT_EMAIL}
+
+      - PGADMIN_DEFAULT_PASSWORD=${PGADMIN_DEFAULT_PASSWORD}
+
+    ports:
+
+      - "8080:80"
+
+    volumes:
+
+      - pgadmin_data:/var/lib/pgadmin
+
+    restart: unless-stopped
+
+    networks:
+
+      - jobloop-network
 
   loki:
-    image: grafana/loki:latest
-    container_name: jobloop-loki
-    ports:
-      - "3100:3100"
-    volumes:
-      - ./configs/loki-config.yml:/etc/loki/local-config.yaml:ro
-      - loki_data:/loki
-    command: -config.file=/etc/loki/local-config.yaml
-    restart: unless-stopped
-    networks:
-      - jobloop-network
 
+    image: grafana/loki:latest
+
+    container_name: jobloop-loki
+
+    ports:
+
+      - "3100:3100"
+
+    volumes:
+
+      - ./configs/loki-config.yml:/etc/loki/local-config.yaml:ro
+
+      - loki_data:/loki
+
+    command: -config.file=/etc/loki/local-config.yaml
+
+    restart: unless-stopped
+
+    networks:
+
+      - jobloop-network
 
   promtail:
+
     image: grafana/promtail:latest
+
     container_name: jobloop-promtail
+
     volumes:
+
       - ./configs/promtail-config.yml:/etc/promtail/config.yml:ro
+
       - /var/run/docker.sock:/var/run/docker.sock:ro
+
       - server_logs:/app/logs/server:ro
+
       - scraper_logs:/app/logs/scraper:ro
+
     command: -config.file=/etc/promtail/config.yml
+
     depends_on:
+
       - loki
+
     restart: unless-stopped
+
     networks:
+
       - jobloop-network
 
-
   grafana:
+
     image: grafana/grafana:latest
+
     container_name: jobloop-grafana
+
     ports:
+
       - "3000:3000"
+
     environment:
+
       - GF_SECURITY_ADMIN_USER=${GRAFANA_USER:-admin}
+
       - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
+
       - GF_USERS_ALLOW_SIGN_UP=false
+
     volumes:
+
       - ./configs/grafana-datasources.yml:/etc/grafana/provisioning/datasources/datasources.yml:ro
+
       - grafana_data:/var/lib/grafana
+
     depends_on:
+
       - loki
+
     restart: unless-stopped
+
     networks:
+
       - jobloop-network
 
 volumes:
+
   postgres_data:
+
   pgadmin_data:
+
   loki_data:
+
   grafana_data:
+
   server_logs:
+
   scraper_logs:
 
 networks:
+
   jobloop-network:
+
     driver: bridge

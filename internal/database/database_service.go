@@ -43,7 +43,7 @@ func (db *DatabaseService) CreateSchema() error {
 	if err := db.DB.DB.Exec("CREATE EXTENSION IF NOT EXISTS citext").Error; err != nil {
 		return fmt.Errorf("failed to create citext extension: %w", err)
 	}
-	err := db.DB.DB.AutoMigrate(&schema.SeedCompany{}, &schema.TestimonialCompany{}, &schema.Job{})
+	err := db.DB.DB.AutoMigrate(&schema.SeedCompany{}, &schema.TestimonialCompany{}, &schema.Job{}, &schema.Noise{})
 	return err
 }
 

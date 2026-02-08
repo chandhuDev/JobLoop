@@ -19,16 +19,12 @@ func NewHandlers(db *gorm.DB) *Handlers {
 }
 
 func (h *Handlers) RegisterRoutes(mux *http.ServeMux) {
-	// Health check
 	mux.HandleFunc("GET /health", h.healthCheck)
 
-	// Companies
 	mux.HandleFunc("GET /api/companies", h.getCompanies)
 
-	// Jobs
 	mux.HandleFunc("GET /api/jobs", h.getJobs)
 
-	// Stats
 	mux.HandleFunc("GET /api/state", h.getDBStats)
 }
 
@@ -74,7 +70,9 @@ func (h *Handlers) getCompanies(w http.ResponseWriter, r *http.Request) {
 func (h *Handlers) getJobs(w http.ResponseWriter, r *http.Request) {
 	limit := 50
 	offset := 0
-	companyID := r.URL.Query().Get("company_id")
+	titleFilter := r.URL.Query().Get("title")
+
+	filterType := r.URL.Query().Get("type")
 
 	if l := r.URL.Query().Get("limit"); l != "" {
 		if parsed, err := parseInt(l); err == nil && parsed > 0 && parsed <= 100 {
@@ -88,11 +86,21 @@ func (h *Handlers) getJobs(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var jobs []schema.Job
-	query := h.DB.Order("id ASC").Limit(limit).Offset(offset)
+	query := h.DB.Order("id DESC").Limit(limit).Offset(offset)
 
-	if companyID != "" {
-		query = query.Where("seed_company_id = ?", companyID)
+	switch filterType {
+	case "engineering":
+		query = query.Where("job_type = ?", "engineering")
+	case "other":
+		query = query.Where("job_type = ?", "other")
+	case "all", "":
+	default:
 	}
+
+	if titleFilter != "" {
+		query = query.Where("job_title ILIKE ?", "%"+titleFilter+"%")
+	}
+
 	result := query.Find(&jobs)
 	if result.Error != nil {
 		h.errorResponse(w, http.StatusInternalServerError, "Failed to fetch jobs")
@@ -101,8 +109,16 @@ func (h *Handlers) getJobs(w http.ResponseWriter, r *http.Request) {
 
 	var total int64
 	countQuery := h.DB.Model(&schema.Job{})
-	if companyID != "" {
-		countQuery = countQuery.Where("seed_company_id = ?", companyID)
+
+	switch filterType {
+	case "engineering":
+		countQuery = countQuery.Where("job_type = ?", "engineering")
+	case "other":
+		countQuery = countQuery.Where("job_type = ?", "other")
+	}
+
+	if titleFilter != "" {
+		countQuery = countQuery.Where("job_title ILIKE ?", "%"+titleFilter+"%")
 	}
 	countQuery.Count(&total)
 
@@ -111,21 +127,24 @@ func (h *Handlers) getJobs(w http.ResponseWriter, r *http.Request) {
 		"total":  total,
 		"limit":  limit,
 		"offset": offset,
+		"filter": filterType,
 	})
 }
 
 func (h *Handlers) getDBStats(w http.ResponseWriter, r *http.Request) {
-	var companyCount int64
-	var jobCount int64
+	var stats struct {
+		Engineering int64 `json:"engineering"`
+		Other       int64 `json:"other"`
+		Noise       int64 `json:"noise"`
+		Total       int64 `json:"total"`
+	}
 
-	h.DB.Model(&schema.SeedCompany{}).Count(&companyCount)
-	h.DB.Model(&schema.Job{}).Count(&jobCount)
+	h.DB.Model(&schema.Job{}).Where("job_type = ?", "engineering").Count(&stats.Engineering)
+	h.DB.Model(&schema.Job{}).Where("job_type = ?", "other").Count(&stats.Other)
+	h.DB.Model(&schema.Noise{}).Count(&stats.Noise)
+	stats.Total = stats.Engineering + stats.Other
 
-	h.jsonResponse(w, http.StatusOK, map[string]interface{}{
-		"companies": companyCount,
-		"jobs":      jobCount,
-		"timestamp": time.Now().Format(time.RFC3339),
-	})
+	h.jsonResponse(w, http.StatusOK, stats)
 }
 
 func (h *Handlers) jsonResponse(w http.ResponseWriter, status int, data interface{}) {

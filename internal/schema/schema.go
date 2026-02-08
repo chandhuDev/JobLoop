@@ -35,6 +35,16 @@ type Job struct {
 	SeedCompanyID uint   `gorm:"not null;uniqueIndex:uniq_job_index"`
 	JobTitle      string `gorm:"type:citext;not null;uniqueIndex:uniq_job_index"`
 	JobUrl        string `gorm:"not null"`
+	IsEngineering bool   `json:"is_engineering" gorm:"default:true;index"`
+	JobType       string `json:"job_type" gorm:"default:'unknown'"`
 
 	CreatedAt time.Time
+}
+
+type Noise struct {
+	ID            uint      `gorm:"primaryKey"`
+	NoiseUrl      string    `gorm:"not null;uniqueIndex"`
+	NoiseText     string    `gorm:"not null"`
+	SeedCompanyID uint      `gorm:"not null;index"`
+	CreatedAt     time.Time `gorm:"autoCreateTime"`
 }
