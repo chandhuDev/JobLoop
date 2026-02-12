@@ -12,31 +12,9 @@ import (
 )
 
 var (
-	engineeringPatterns = []string{
-		"engineer", "developer", "software", "backend", "frontend",
-		"full stack", "fullstack", "devops", "sre", "data engineer",
-		"machine learning", "ml engineer", "ai engineer", "architect",
-		"programming", "coding", "technical lead", "tech lead",
-		"qa engineer", "test engineer", "platform engineer",
-		"infrastructure", "security engineer", "cloud engineer",
-		"golang", "python", "java", "javascript", "react", "node",
-		"ios", "android", "mobile", "embedded", "systems engineer",
-	}
+	engineeringRegex = regexp.MustCompile(`(?i)(engineer|developer|software|backend|frontend|full[\s-]?stack|devops|sre|data engineer|machine learning|ml engineer|ai engineer|architect|programming|coding|technical lead|tech lead|qa engineer|test engineer|platform engineer|infrastructure|security engineer|cloud engineer|golang|python|java|javascript|react|node|ios|android|mobile|embedded|systems engineer)`)
 
-	noisePatterns = []*regexp.Regexp{
-		regexp.MustCompile(`(?i)create\s+account`),
-		regexp.MustCompile(`(?i)sign\s+up`),
-		regexp.MustCompile(`(?i)log\s*in`),
-		regexp.MustCompile(`(?i)getting\s+started`),
-		regexp.MustCompile(`(?i)privacy\s+policy`),
-		regexp.MustCompile(`(?i)cookie\s+policy`),
-		regexp.MustCompile(`(?i)terms\s+(of\s+)?(service|use)`),
-		regexp.MustCompile(`help\..*\.com`),
-		regexp.MustCompile(`support\..*\.com`),
-		regexp.MustCompile(`(?i)contact\s+us`),
-		regexp.MustCompile(`(?i)^\s*faq\s*$`),
-		regexp.MustCompile(`(?i)medium\.com`),	
-	}
+	noiseRegex = regexp.MustCompile(`(?i)(create\s+account|sign\s+up|log\s*in|getting\s+started|privacy\s+policy|cookie\s+policy|terms\s+(of\s+)?(service|use)|contact\s+us|^\s*faq\s*$|medium\.com|help\..*\.com|support\..*\.com|linkedin\.com|partner-with-us|account|subscription|privacy|terms|product-help|product-support|clear-finance|customers?|customer-service|product-updates|-vs-|product[- ]?tour|business|product-marketing|changelog|mergers-and-acquisitions|customer-experience|explorer|defence|blog|ads?|reviews?|case-studies?|partners?|sales|business-funding|schedule-a-call)`)
 
 	excludeTitles = []string{
 		"manager", "sales", "marketing", "recruiter",
@@ -45,40 +23,28 @@ var (
 	}
 )
 
-func isNoise(title string) bool {
-	for _, pattern := range noisePatterns {
-		if pattern.MatchString(title) {
-			return true
-		}
+func isNoise(title, url string) bool {
+	if len(strings.TrimSpace(title)) < 3 {
+		return true
 	}
-	return len(strings.TrimSpace(title)) < 3
-}
 
-func hasEngineeringKeyword(text string) bool {
-	for _, keyword := range engineeringPatterns {
-		if strings.Contains(text, keyword) {
-			return true
-		}
-	}
-	return false
+	return noiseRegex.MatchString(title) || noiseRegex.MatchString(url)
 }
 
 func isEngineeringJob(title string) bool {
 	titleLower := strings.ToLower(title)
 
-	if isNoise(title) {
+	if noiseRegex.MatchString(titleLower) {
 		return false
 	}
 
 	for _, excluded := range excludeTitles {
-		if strings.Contains(titleLower, excluded) {
-			if !hasEngineeringKeyword(titleLower) {
-				return false
-			}
+		if strings.Contains(titleLower, excluded) && !engineeringRegex.MatchString(titleLower) {
+			return false
 		}
 	}
 
-	return hasEngineeringKeyword(titleLower)
+	return engineeringRegex.MatchString(titleLower)
 }
 
 func UpsertJob(DB *gorm.DB, scid uint, jobs []models.LinkData) error {
@@ -90,7 +56,8 @@ func UpsertJob(DB *gorm.DB, scid uint, jobs []models.LinkData) error {
 	otherCount := 0
 
 	for _, job := range jobs {
-		if isNoise(job.Text) {
+
+		if isNoise(job.Text, job.URL) {
 			noiseRecords = append(noiseRecords, schema.Noise{
 				NoiseUrl:      job.URL,
 				NoiseText:     job.Text,
@@ -102,30 +69,29 @@ func UpsertJob(DB *gorm.DB, scid uint, jobs []models.LinkData) error {
 
 		isEng := isEngineeringJob(job.Text)
 		jobType := "other"
+
 		if isEng {
 			jobType = "engineering"
 			engineeringCount++
-			jobRecords = append(jobRecords, schema.Job{
-				SeedCompanyID: scid,
-				JobTitle:      job.Text,
-				JobUrl:        job.URL,
-				IsEngineering: isEng,
-				JobType:       jobType,
-			})
 		} else {
-			jobType = "other"
 			otherCount++
-			jobRecords = append(jobRecords, schema.Job{
-				SeedCompanyID: scid,
-				JobTitle:      job.Text,
-				JobUrl:        job.URL,
-				IsEngineering: false,
-				JobType:       jobType,
-			})
 		}
+
+		jobRecords = append(jobRecords, schema.Job{
+			SeedCompanyID: scid,
+			JobTitle:      job.Text,
+			JobUrl:        job.URL,
+			IsEngineering: isEng,
+			JobType:       jobType,
+		})
 	}
 
-	logger.Info().Int("engineering_jobs", engineeringCount).Int("other_jobs", otherCount).Int("noise_filtered", noiseCount).Uint("seed_company_id", scid).Msg("upserting jobs")
+	logger.Info().
+		Int("engineering_jobs", engineeringCount).
+		Int("other_jobs", otherCount).
+		Int("noise_filtered", noiseCount).
+		Uint("seed_company_id", scid).
+		Msg("upserting jobs")
 
 	if len(noiseRecords) > 0 {
 		if err := DB.Clauses(clause.OnConflict{
